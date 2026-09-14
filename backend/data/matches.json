@@ -1,0 +1,44 @@
+{
+    "matches": [
+        {
+            "id": 1,
+            "date": "2026-09-19",
+            "time": "14:00",
+            "home_team": "Debreceni VSC II",
+            "away_team": "Hajdúszoboszlói SE",
+            "location": "Debrecen",
+            "required_referees": 3,
+            "required_cadre": "Megye 1"
+        },
+        {
+            "id": 2,
+            "date": "2026-09-19",
+            "time": "15:00",
+            "home_team": "Berettyóújfalui FC",
+            "away_team": "Balmazújvárosi FC",
+            "location": "Berettyóújfalu",
+            "required_referees": 3,
+            "required_cadre": "Megye 2"
+        },
+        {
+            "id": 3,
+            "date": "2026-09-19",
+            "time": "16:00",
+            "home_team": "Hajdúböszörményi TE",
+            "away_team": "Debreceni EAC",
+            "location": "Hajdúböszörmény",
+            "required_referees": 3,
+            "required_cadre": "Megye 3"
+        },
+        {
+            "id": 4,
+            "date": "2026-09-19",
+            "time": "17:00",
+            "home_team": "Hajdúszoboszlói SE",
+            "away_team": "Berettyóújfalui FC",
+            "location": "Hajdúszoboszló",
+            "required_referees": 3,
+            "required_cadre": "Megye 2"
+        }
+    ]
+}
