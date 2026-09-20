@@ -1,44 +1,34 @@
 {
-    "matches": [
-        {
-            "id": 1,
-            "date": "2026-09-19",
-            "time": "14:00",
-            "home_team": "Debreceni VSC II",
-            "away_team": "Hajdúszoboszlói SE",
-            "location": "Debrecen",
-            "required_referees": 3,
-            "required_cadre": "Megye 1"
-        },
-        {
-            "id": 2,
-            "date": "2026-09-19",
-            "time": "15:00",
-            "home_team": "Berettyóújfalui FC",
-            "away_team": "Balmazújvárosi FC",
-            "location": "Berettyóújfalu",
-            "required_referees": 3,
-            "required_cadre": "Megye 2"
-        },
-        {
-            "id": 3,
-            "date": "2026-09-19",
-            "time": "16:00",
-            "home_team": "Hajdúböszörményi TE",
-            "away_team": "Debreceni EAC",
-            "location": "Hajdúböszörmény",
-            "required_referees": 3,
-            "required_cadre": "Megye 3"
-        },
-        {
-            "id": 4,
-            "date": "2026-09-19",
-            "time": "17:00",
-            "home_team": "Hajdúszoboszlói SE",
-            "away_team": "Berettyóújfalui FC",
-            "location": "Hajdúszoboszló",
-            "required_referees": 3,
-            "required_cadre": "Megye 2"
-        }
-    ]
+  "matches": [
+    {
+      "id": 1,
+      "date": "2026-09-18",
+      "time": "14:00",
+      "home_team": "Deac",
+      "away_team": "Berettyo",
+      "location": "Debrecen",
+      "required_referees": 3,
+      "required_cadre": "m1"
+    },
+    {
+      "id": 2,
+      "date": "2026-09-19",
+      "time": "15:00",
+      "home_team": "Nagyrabe",
+      "away_team": "Konyar",
+      "location": "Nagyrabe",
+      "required_referees": 3,
+      "required_cadre": "m2"
+    },
+    {
+      "id": 3,
+      "date": "2026-09-20",
+      "time": "16:00",
+      "home_team": "Derecske",
+      "away_team": "Komadi",
+      "location": "Derecske",
+      "required_referees": 2,
+      "required_cadre": "u14"
+    }
+  ]
 }
