@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 import json
 from pathlib import Path
 import pandas as pd
@@ -7,11 +7,12 @@ app = Flask(__name__)
 app.json.sort_keys = False  # JSON kulcsok sorrendjének megtartása
 
 DATA_DIR = Path(__file__).parent / "data"
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 
 @app.route("/")
 def home():
-    return "Referee Assignment Optimizer API"
+    return send_from_directory(FRONTEND_DIR, "index.html")
 
 
 @app.route("/referees", methods=["GET"])
@@ -75,6 +76,29 @@ def upload_matches():
 
         # Csak a szükséges oszlopokat használjuk
         matches_df = df[required_columns].copy()
+
+        # Hiányzó értékek ellenőrzése
+        missing_values = []
+
+        for index, row in matches_df.iterrows():
+            for column in required_columns:
+                value = row[column]
+
+                # Üres, NaN vagy csak szóközökből álló érték ellenőrzése
+                if pd.isna(value) or (
+                    isinstance(value, str) and value.strip() == ""
+                ):
+                    missing_values.append({
+                        "row": index + 2,
+                        "column": column
+                    })
+
+        if missing_values:
+            return jsonify({
+                "error": "A feltöltött Excel hiányzó értékeket tartalmaz.",
+                "missing_values": missing_values
+            }), 400
+
 
         # Automatikus azonosító létrehozása
         matches_df.insert(

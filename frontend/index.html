@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="hu">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Játékvezetői küldés optimalizáló</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 30px;
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            color: #222;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .section {
+            background: white;
+            padding: 24px;
+            margin-bottom: 24px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        input[type="file"] {
+            margin: 12px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #f1f5f9;
+        }
+
+        .message {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            background: #eff6ff;
+            color: #1e40af;
+        }
+
+        .error {
+            background: #fef2f2;
+            color: #b91c1c;
+        }
+
+        @media (max-width: 700px) {
+            body {
+                padding: 15px;
+            }
+
+            .section {
+                padding: 16px;
+                overflow-x: auto;
+            }
+
+            table {
+                min-width: 650px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Játékvezetői küldés optimalizáló</h1>
+        <p class="subtitle">
+            Hajdú-Bihar vármegyei amatőr labdarúgó-mérkőzések kezelése
+        </p>
+
+        <section class="section">
+            <h2>Mérkőzések feltöltése</h2>
+
+            <form id="uploadForm">
+                <input type="file" id="matchesFile" accept=".xlsx,.xls" required>
+
+                <br>
+
+                <button type="submit">
+                    Excel feltöltése
+                </button>
+            </form>
+
+            <div id="uploadMessage"></div>
+        </section>
+
+        <section class="section">
+            <h2>Játékvezetők</h2>
+
+            <button id="loadRefereesButton">
+                Játékvezetők betöltése
+            </button>
+
+            <div id="refereesContainer"></div>
+        </section>
+
+        <section class="section">
+            <h2>Aktuális mérkőzések</h2>
+
+            <button id="loadMatchesButton">
+                Mérkőzések betöltése
+            </button>
+
+            <div id="matchesContainer"></div>
+        </section>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById("uploadForm");
+        const matchesFile = document.getElementById("matchesFile");
+        const uploadMessage = document.getElementById("uploadMessage");
+
+        const refereesContainer =
+            document.getElementById("refereesContainer");
+
+        const matchesContainer =
+            document.getElementById("matchesContainer");
+
+        // Excel feltöltése
+        uploadForm.addEventListener("submit", async function (event) {
+            event.preventDefault();
+
+            const file = matchesFile.files[0];
+
+            if (!file) {
+                showMessage(
+                    uploadMessage,
+                    "Válassz ki egy Excel-fájlt!",
+                    true
+                );
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            try {
+                const response = await fetch("/matches", {
+                    method: "POST",
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Sikertelen feltöltés.");
+                }
+
+                showMessage(
+                    uploadMessage,
+                    `Sikeres feltöltés! ${data.count} mérkőzés feldolgozva.`
+                );
+
+                loadMatches();
+
+            } catch (error) {
+                showMessage(
+                    uploadMessage,
+                    error.message,
+                    true
+                );
+            }
+        });
+
+        // Játékvezetők betöltése
+        document
+            .getElementById("loadRefereesButton")
+            .addEventListener("click", loadReferees);
+
+        async function loadReferees() {
+            try {
+                const response = await fetch("/referees");
+                const data = await response.json();
+
+                if (!data.referees || data.referees.length === 0) {
+                    refereesContainer.innerHTML =
+                        "<p>Nincsenek játékvezetők.</p>";
+                    return;
+                }
+
+                let html = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Név</th>
+                                <th>Lakhely</th>
+                                <th>Kategória</th>
+                                <th>Autó</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.referees.forEach(referee => {
+                    html += `
+                        <tr>
+                            <td>${referee.id}</td>
+                            <td>${referee.name}</td>
+                            <td>${referee.residence}</td>
+                            <td>${referee.cadre}</td>
+                            <td>${referee.has_car ? "Igen" : "Nem"}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+
+                refereesContainer.innerHTML = html;
+
+            } catch (error) {
+                refereesContainer.innerHTML =
+                    `<p class="error">Hiba: ${error.message}</p>`;
+            }
+        }
+
+        // Mérkőzések betöltése
+        document
+            .getElementById("loadMatchesButton")
+            .addEventListener("click", loadMatches);
+
+        async function loadMatches() {
+            try {
+                const response = await fetch("/matches");
+                const data = await response.json();
+
+                if (!data.matches || data.matches.length === 0) {
+                    matchesContainer.innerHTML =
+                        "<p>Nincsenek feltöltött mérkőzések.</p>";
+                    return;
+                }
+
+                let html = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Dátum</th>
+                                <th>Időpont</th>
+                                <th>Hazai csapat</th>
+                                <th>Vendégcsapat</th>
+                                <th>Helyszín</th>
+                                <th>Játékvezetők száma</th>
+                                <th>Kategória</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                data.matches.forEach(match => {
+                    html += `
+                        <tr>
+                            <td>${match.id}</td>
+                            <td>${match.date}</td>
+                            <td>${match.time}</td>
+                            <td>${match.home_team}</td>
+                            <td>${match.away_team}</td>
+                            <td>${match.location}</td>
+                            <td>${match.required_referees}</td>
+                            <td>${match.required_cadre}</td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+
+                matchesContainer.innerHTML = html;
+
+            } catch (error) {
+                matchesContainer.innerHTML =
+                    `<p class="error">Hiba: ${error.message}</p>`;
+            }
+        }
+
+        function showMessage(element, message, isError = false) {
+            element.textContent = message;
+            element.className = isError ? "message error" : "message";
+        }
+
+        // Az oldal betöltésekor automatikusan lekérjük az adatokat
+        //loadReferees();
+        //loadMatches();
+    </script>
+</body>
+
+</html>

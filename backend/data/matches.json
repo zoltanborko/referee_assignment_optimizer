@@ -19,6 +19,16 @@
       "location": "Nagyrabe",
       "required_referees": 3,
       "required_cadre": "m2"
+    },
+    {
+      "id": 3,
+      "date": "2026-09-20",
+      "time": "16:00",
+      "home_team": "Derecske",
+      "away_team": "Komadi",
+      "location": "Derecske",
+      "required_referees": 2,
+      "required_cadre": "u14"
     }
   ]
 }
