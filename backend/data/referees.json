@@ -1,0 +1,18 @@
+{
+    "referees": [
+        {
+            "id": 1,
+            "name": "John Doe",
+            "city": "Debrecen",
+            "level": "m1",
+            "has_car": false
+        },
+        {
+            "id": 2,
+            "name": "Jane Smith",
+            "city": "Hajdúböszörmény",
+            "level": "m2",
+            "has_car": true
+        }
+    ]
+}
