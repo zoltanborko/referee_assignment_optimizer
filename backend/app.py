@@ -24,20 +24,20 @@ def normalize_text(value):
     return str(value).strip().lower()
 
 
-def get_required_referees(age_group):
+def get_required_referees(competition_name):
     """
-    A korosztály alapján meghatározza,
+    A bajnokság alapján meghatározza,
     hány játékvezető szükséges a mérkőzésre.
 
     Alapértelmezés: 3 fő.
     """
 
-    age_group = normalize_text(age_group)
+    competition_name = normalize_text(competition_name)
 
     two_referees = {
         "vármegyei u-16 a",
         "vármegyei u-16 b",
-        "vármegyei u15",
+        "vármegyei u-15",
         "vármegyei u-14 a",
         "vármegyei u-14 b",
     }
@@ -48,14 +48,14 @@ def get_required_referees(age_group):
         "vármegyei u-13 c",
         "vármegyei u-13 m",
         "vármegyei u-13 n",
-        "mlsz regionális u-12",
-        "mlsz regionális u-13",
+        "mlsz regionális u-12 északkeleti csoport",
+        "mlsz regionális u-13 északkeleti csoport",
     }
 
-    if age_group in two_referees:
+    if competition_name in two_referees:
         return 2
 
-    if age_group in one_referee:
+    if competition_name in one_referee:
         return 1
 
     return 3
@@ -191,7 +191,7 @@ def upload_matches():
             "Dátum",
             "Időpont",
             "Mérkőzés státusza",
-            "Korosztály",
+            "Verseny név",
             "Hazai csapat",
             "Vendég csapat",
             "Cím"
@@ -244,7 +244,7 @@ def upload_matches():
                 "Versenytípus",
                 "Dátum",
                 "Időpont",
-                "Korosztály",
+                "Verseny név",
                 "Hazai csapat",
                 "Vendég csapat",
                 "Cím"
@@ -318,7 +318,7 @@ def upload_matches():
         # Település kinyerése a címből
         # -------------------------------------------------
 
-        matches_df["Helyszín"] = matches_df["Cím"].apply(
+        matches_df["location"] = matches_df["Cím"].apply(
             extract_settlement
         )
 
@@ -327,7 +327,7 @@ def upload_matches():
         # -------------------------------------------------
 
         matches_df["required_referees"] = (
-            matches_df["Korosztály"]
+            matches_df["Verseny név"]
             .apply(get_required_referees)
         )
 
@@ -349,7 +349,7 @@ def upload_matches():
                 "Versenytípus": "versenytipus",
                 "Dátum": "date",
                 "Időpont": "time",
-                "Korosztály": "korosztaly",
+                "Verseny név": "versenynev",
                 "Hazai csapat": "home_team",
                 "Vendég csapat": "away_team",
                 "Cím": "address"
@@ -366,18 +366,18 @@ def upload_matches():
                 "date",
                 "time",
                 "versenytipus",
-                "korosztaly",
+                "versenynev",
                 "home_team",
                 "away_team",
                 "address",
-                "Helyszín",
+                "location",
                 "required_referees",
                 "required_cadre"
             ]
         ]
 
         matches_df = matches_df.fillna("")
-        
+
         matches = matches_df.to_dict(
             orient="records"
         )
