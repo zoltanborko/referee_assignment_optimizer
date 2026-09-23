@@ -1,1 +1,4 @@
 backend/data/*.json
+
+backend/services/x__pycache__/
+*.pyc
