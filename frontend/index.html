@@ -94,6 +94,11 @@
             color: #b91c1c;
         }
 
+        .warning {
+            background: #fffbeb;
+            color: #92400e;
+        }
+
         @media (max-width: 700px) {
             body {
                 padding: 15px;
@@ -196,9 +201,13 @@
                     throw new Error(data.error || "Sikertelen feltöltés.");
                 }
 
+                const warningText = (data.warnings || []).join(" ");
                 showMessage(
                     uploadMessage,
-                    `Sikeres feltöltés! ${data.count} mérkőzés feldolgozva.`
+                    `Sikeres feltöltés! ${data.count} mérkőzés feldolgozva.` +
+                        (warningText ? ` Figyelmeztetés: ${warningText}` : ""),
+                    false,
+                    Boolean(warningText)
                 );
 
                 loadMatches();
@@ -295,7 +304,7 @@
                                 <th>Vendégcsapat</th>
                                 <th>Helyszín</th>
                                 <th>Játékvezetők száma</th>
-                                <th>Kerettagság</th>
+                                <th>JV Kerettagság</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -307,7 +316,7 @@
                             <td>${match.id}</td>
                             <td>${match.date}</td>
                             <td>${match.time}</td>
-                            <td>${match.versenynev}</td>
+                            <td>${match.compname}</td>
                             <td>${match.home_team}</td>
                             <td>${match.away_team}</td>
                             <td>${match.location}</td>
@@ -330,9 +339,11 @@
             }
         }
 
-        function showMessage(element, message, isError = false) {
+        function showMessage(element, message, isError = false, isWarning = false) {
             element.textContent = message;
-            element.className = isError ? "message error" : "message";
+            element.className = isError
+                ? "message error"
+                : isWarning ? "message warning" : "message";
         }
 
         // Az oldal betöltésekor automatikusan lekérjük az adatokat
