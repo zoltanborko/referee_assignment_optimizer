@@ -60,7 +60,7 @@ def get_required_cadre(competition_type):
 def extract_settlement(address):
 
     if pd.isna(address):
-        return ""
+        return "Debrecen"
 
     address = str(address).strip()
 
@@ -71,7 +71,7 @@ def extract_settlement(address):
     ).strip()
 
     if not address_without_zip:
-        return ""
+        return "Debrecen"
 
     if normalize_text(address_without_zip).startswith(
         "debrecen-pallag"
@@ -168,6 +168,14 @@ def import_matches_from_excel(file):
             "Cím"
         ]
     ].copy()
+
+    # Üres cím esetén a település Debrecen lesz, de jelezzük, mely
+    # Excel-sorokban érdemes a címet kézzel pótolni.
+    missing_address_rows = [
+        int(index + 9)
+        for index, value in matches_df["Cím"].items()
+        if pd.isna(value) or str(value).strip() == ""
+    ]
 
     # -----------------------------------------------------
     # Hiányzó adatok
@@ -268,13 +276,14 @@ def import_matches_from_excel(file):
 
     matches_df = matches_df.rename(
         columns={
-            "Versenytípus": "versenytipus",
+            "Versenytípus": "comptype",
             "Dátum": "date",
             "Időpont": "time",
-            "Verseny név": "versenynev",
+            "Verseny név": "compname",
             "Hazai csapat": "home_team",
             "Vendég csapat": "away_team",
-            "Cím": "address"
+            "Cím": "address",
+            "Helyszín": "location"
         }
     )
 
@@ -287,20 +296,28 @@ def import_matches_from_excel(file):
             "id",
             "date",
             "time",
-            "versenytipus",
-            "versenynev",
+            "comptype",
+            "compname",
             "home_team",
             "away_team",
-            "address",
-            "Helyszín",
+            "location",
             "required_referees",
             "required_cadre"
         ]
     ]
 
     # NaN → üres string
-    matches_df = matches_df.fillna("")
+    #matches_df = matches_df.fillna("")
 
-    return matches_df.to_dict(
-        orient="records"
-    )
+    matches = matches_df.to_dict(orient="records")
+    warnings = []
+    if missing_address_rows:
+        rows = ", ".join(str(row) for row in missing_address_rows)
+        warnings.append(
+            "Néhány mérkőzésnél üres a Cím mező "
+            f"(Excel sorok: {rows}). Ha ismert, töltsd ki csak a település nevével, így: "
+            "Földes. A hiányzó című mérkőzéseknél a program "
+            "Debrecen településsel számol."
+        )
+
+    return matches, warnings

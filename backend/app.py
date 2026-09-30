@@ -64,13 +64,14 @@ def upload_matches():
 
     try:
 
-        matches = import_matches_from_excel(file)
+        matches, warnings = import_matches_from_excel(file)
 
         save_matches(matches)
 
         return jsonify({
             "message": "A mérkőzések sikeresen feltöltve.",
             "count": len(matches),
+            "warnings": warnings,
             "matches": matches
         }), 201
 
