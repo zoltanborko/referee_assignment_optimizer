@@ -2,6 +2,13 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from services.excel_import import import_matches_from_excel
 from services.match_service import save_matches, load_matches
+from services.ref_pool_service import load_ref_pool, set_ref_pool
+from services.referee_service import (
+    add_referee,
+    delete_referee,
+    load_referees,
+    update_referee,
+)
 
 
 app = Flask(__name__)
@@ -26,16 +33,54 @@ def home():
 
 @app.route("/referees", methods=["GET"])
 def get_referees():
+    return jsonify({"referees": load_referees()})
 
-    from pathlib import Path
-    import json
 
-    file_path = Path(__file__).parent / "data" / "referees.json"
+@app.route("/referees", methods=["POST"])
+def create_referee():
+    try:
+        referee = add_referee(request.get_json(silent=True))
+        return jsonify({"referee": referee}), 201
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
-    with open(file_path, "r", encoding="utf-8") as file:
-        data = json.load(file)
 
-    return jsonify(data)
+@app.route("/referees/<referee_id>", methods=["PUT"])
+def edit_referee(referee_id):
+    try:
+        referee = update_referee(referee_id, request.get_json(silent=True))
+        if referee is None:
+            return jsonify({"error": "A játékvezető nem található."}), 404
+        return jsonify({"referee": referee})
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
+
+@app.route("/referees/<referee_id>", methods=["DELETE"])
+def remove_referee(referee_id):
+    if not delete_referee(referee_id):
+        return jsonify({"error": "A játékvezető nem található."}), 404
+    return jsonify({"message": "A játékvezető törlése sikerült."})
+
+
+@app.route("/ref-pool", methods=["GET"])
+def get_ref_pool():
+    return jsonify({"refPool": load_ref_pool()})
+
+
+@app.route("/ref-pool", methods=["POST"])
+def update_ref_pool():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "A kérés adatai hibásak."}), 400
+    try:
+        ref_pool = set_ref_pool(payload.get("referee_ids"))
+        return jsonify({
+            "message": f"{len(ref_pool)} elérhető játékvezető került a refPool-ba.",
+            "refPool": ref_pool,
+        })
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
 
 
 # ---------------------------------------------------------
