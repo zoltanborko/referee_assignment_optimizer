@@ -9,6 +9,7 @@ from services.referee_service import (
     load_referees,
     update_referee,
 )
+from services.match_pool_service import create_match_pool, save_matchpool
 
 
 app = Flask(__name__)
@@ -112,6 +113,7 @@ def upload_matches():
         matches, warnings = import_matches_from_excel(file)
 
         save_matches(matches)
+        create_match_pool(matches)
 
         return jsonify({
             "message": "A mérkőzések sikeresen feltöltve.",
@@ -119,6 +121,8 @@ def upload_matches():
             "warnings": warnings,
             "matches": matches
         }), 201
+        
+        
 
     except ValueError as error:
 

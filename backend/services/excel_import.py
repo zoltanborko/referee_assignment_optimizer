@@ -111,7 +111,8 @@ def import_matches_from_excel(file):
         "Verseny név",
         "Hazai csapat",
         "Vendég csapat",
-        "Cím"
+        "Cím",
+        "Korosztály"
     ]
 
     missing_columns = [
@@ -165,7 +166,8 @@ def import_matches_from_excel(file):
             "Verseny név",
             "Hazai csapat",
             "Vendég csapat",
-            "Cím"
+            "Cím",
+            "Korosztály"
         ]
     ].copy()
 
@@ -283,7 +285,8 @@ def import_matches_from_excel(file):
             "Hazai csapat": "home_team",
             "Vendég csapat": "away_team",
             "Cím": "address",
-            "Helyszín": "location"
+            "Helyszín": "location",
+            "Korosztály": "age_group"
         }
     )
 
@@ -296,8 +299,9 @@ def import_matches_from_excel(file):
             "id",
             "date",
             "time",
-            "comptype",
+            #"comptype",
             "compname",
+            "age_group",
             "home_team",
             "away_team",
             "location",

@@ -187,7 +187,7 @@
     <div class="container">
         <h1>Játékvezetői küldés optimalizáló</h1>
         <p class="subtitle">
-            Hajdú-Bihar vármegyei amatőr labdarúgó-mérkőzések kezelése
+            Hajdú-Bihar vármegyei amatőr labdarúgó-mérkőzésekhez
         </p>
 
         <section class="section">
@@ -434,7 +434,7 @@
                 const warningText = (data.warnings || []).join(" ");
                 showMessage(
                     uploadMessage,
-                    `Sikeres feltöltés! ${data.count} mérkőzés feldolgozva.` +
+                    `Sikeres feltöltés! ${data.count} mérkőzés feldolgozva.\n` +
                     (warningText ? ` Figyelmeztetés: ${warningText}` : ""),
                     false,
                     Boolean(warningText)
