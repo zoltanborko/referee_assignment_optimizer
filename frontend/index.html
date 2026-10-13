@@ -99,6 +99,69 @@
             color: #92400e;
         }
 
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin: 0 0 20px;
+        }
+
+        button.secondary {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .form-grid label {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 14px;
+        }
+
+        .form-grid input,
+        .form-grid select,
+        .form-grid textarea {
+            width: 100%;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 10px;
+            font: inherit;
+        }
+
+        .form-grid .wide {
+            grid-column: 1 / -1;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .send-referee-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .send-referee-row {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+        }
+
         @media (max-width: 700px) {
             body {
                 padding: 15px;
@@ -112,6 +175,10 @@
             table {
                 min-width: 650px;
             }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -120,7 +187,7 @@
     <div class="container">
         <h1>Játékvezetői küldés optimalizáló</h1>
         <p class="subtitle">
-            Hajdú-Bihar vármegyei amatőr labdarúgó-mérkőzések kezelése
+            Hajdú-Bihar vármegyei amatőr labdarúgó-mérkőzésekhez
         </p>
 
         <section class="section">
@@ -139,24 +206,81 @@
             <div id="uploadMessage"></div>
         </section>
 
-        <section class="section">
-            <h2>Játékvezetők</h2>
+        <nav class="tabs" aria-label="Fő nézetek">
+            <button id="refereesTab">Játékvezetők</button>
+            <button id="matchesTab" class="secondary">Mérkőzések</button>
+            <button id="sendTab" class="secondary">Küldés</button>
+        </nav>
 
-            <button id="loadRefereesButton">
-                Játékvezetők betöltése
-            </button>
+        <section class="section" id="refereesSection">
+            <h2>Játékvezetők kezelése</h2>
 
+            <form id="refereeForm">
+                <div class="form-grid">
+                    <label>
+                        Azonosító *
+                        <input id="refereeId" required>
+                    </label>
+                    <label>
+                        Név *
+                        <input id="refereeName" required>
+                    </label>
+                    <label>
+                        Lakóhely / település
+                        <input id="refereeResidence">
+                    </label>
+                    <label>
+                        Keret
+                        <select id="refereeCadre">
+                            <option value="">Nincs megadva</option>
+                            <option value="megye1">Megye 1</option>
+                            <option value="megye2">Megye 2</option>
+                            <option value="megye3">Megye 3</option>
+                            <option value="megye_egyeb">Megye egyéb</option>
+                        </select>
+                    </label>
+                    <label>
+                        Rendelkezik autóval?
+                        <select id="refereeHasCar">
+                            <option value="">Nincs megadva</option>
+                            <option value="true">Igen</option>
+                            <option value="false">Nem</option>
+                        </select>
+                    </label>
+                    <label>
+                        Státusz
+                        <select id="refereeActive">
+                            <option value="true">Aktív</option>
+                            <option value="false">Inaktív</option>
+                        </select>
+                    </label>
+                    <label class="wide">
+                        Tiltott csapatok (soronként egy csapat)
+                        <textarea id="refereeBannedTeams" rows="3"></textarea>
+                    </label>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" id="saveRefereeButton">Játékvezető felvétele</button>
+                    <button type="button" id="cancelRefereeEdit" class="secondary hidden">Mégse</button>
+                    <button type="button" id="deleteRefereeButton" class="hidden">Törlés</button>
+                </div>
+            </form>
+            <div id="refereeMessage" aria-live="polite"></div>
             <div id="refereesContainer"></div>
         </section>
 
-        <section class="section">
+        <section class="section hidden" id="matchesSection">
             <h2>Aktuális mérkőzések</h2>
-
-            <button id="loadMatchesButton">
-                Mérkőzések betöltése
-            </button>
-
             <div id="matchesContainer"></div>
+        </section>
+
+        <section class="section hidden" id="sendSection">
+            <h2>Játékvezetők elérhetősége</h2>
+            <div id="sendRefereesContainer"></div>
+            <div id="sendMessage" aria-live="polite"></div>
+            <div class="form-actions">
+                <button type="button" id="sendButton">Küldés</button>
+            </div>
         </section>
     </div>
 
@@ -170,6 +294,112 @@
 
         const matchesContainer =
             document.getElementById("matchesContainer");
+        const sendRefereesContainer = document.getElementById("sendRefereesContainer");
+        const refereesSection = document.getElementById("refereesSection");
+        const matchesSection = document.getElementById("matchesSection");
+        const sendSection = document.getElementById("sendSection");
+        const sendButton = document.getElementById("sendButton");
+        const sendMessage = document.getElementById("sendMessage");
+        const refereeForm = document.getElementById("refereeForm");
+        const refereeMessage = document.getElementById("refereeMessage");
+        const refereeIdInput = document.getElementById("refereeId");
+        const refereeNameInput = document.getElementById("refereeName");
+        const refereeResidenceInput = document.getElementById("refereeResidence");
+        const refereeCadreInput = document.getElementById("refereeCadre");
+        const refereeHasCarInput = document.getElementById("refereeHasCar");
+        const refereeActiveInput = document.getElementById("refereeActive");
+        const refereeBannedTeamsInput = document.getElementById("refereeBannedTeams");
+        const saveRefereeButton = document.getElementById("saveRefereeButton");
+        const cancelRefereeEditButton = document.getElementById("cancelRefereeEdit");
+        const deleteRefereeButton = document.getElementById("deleteRefereeButton");
+        let editingRefereeId = null;
+        const unavailableRefereeIds = new Set();
+
+        function showTab(activeTab, activeSection) {
+            [
+                ["refereesTab", refereesSection],
+                ["matchesTab", matchesSection],
+                ["sendTab", sendSection]
+            ].forEach(([tabId, section]) => {
+                section.classList.toggle("hidden", section !== activeSection);
+                document.getElementById(tabId).classList.toggle("secondary", tabId !== activeTab);
+            });
+        }
+
+        document.getElementById("refereesTab").addEventListener("click", () => {
+            showTab("refereesTab", refereesSection);
+            loadReferees();
+        });
+
+        document.getElementById("matchesTab").addEventListener("click", () => {
+            showTab("matchesTab", matchesSection);
+            loadMatches();
+        });
+
+        document.getElementById("sendTab").addEventListener("click", () => {
+            showTab("sendTab", sendSection);
+            loadSendReferees();
+        });
+
+        async function loadSendReferees() {
+            try {
+                const response = await fetch("/referees");
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || "Nem sikerült betölteni a játékvezetőket.");
+                const activeReferees = (data.referees || [])
+                    .filter(referee => referee.active === true)
+                    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "hu", { sensitivity: "base" }));
+
+                if (activeReferees.length === 0) {
+                    sendRefereesContainer.innerHTML = "<p>Nincsenek aktív játékvezetők.</p>";
+                    return;
+                }
+
+                sendRefereesContainer.innerHTML = `<table>
+                    <thead><tr><th>Név</th><th>Kód</th><th>Elérhető</th></tr></thead>
+                    <tbody>${activeReferees.map(referee => {
+                    const id = String(referee.id);
+                    const checked = unavailableRefereeIds.has(id) ? "" : "checked";
+                    return `<tr>
+                            <td>${escapeHtml(referee.name)}</td>
+                            <td>${escapeHtml(id)}</td>
+                            <td><input type="checkbox" aria-label="${escapeHtml(referee.name)} ráér" data-send-referee="${escapeHtml(id)}" ${checked}></td>
+                        </tr>`;
+                }).join("")}</tbody>
+                </table>`;
+            } catch (error) {
+                sendRefereesContainer.innerHTML = `<p class="error">Hiba: ${escapeHtml(error.message)}</p>`;
+            }
+        }
+
+        sendRefereesContainer.addEventListener("change", event => {
+            const checkbox = event.target.closest("[data-send-referee]");
+            if (!checkbox) return;
+            if (checkbox.checked) unavailableRefereeIds.delete(checkbox.dataset.sendReferee);
+            else unavailableRefereeIds.add(checkbox.dataset.sendReferee);
+        });
+
+        sendButton.addEventListener("click", async () => {
+            const refereeIds = Array.from(
+                sendRefereesContainer.querySelectorAll("[data-send-referee]:checked")
+            ).map(checkbox => checkbox.dataset.sendReferee);
+
+            sendButton.disabled = true;
+            try {
+                const response = await fetch("/ref-pool", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ referee_ids: refereeIds })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || "Nem sikerült összeállítani a játékvezetői listát.");
+                showMessage(sendMessage, data.message);
+            } catch (error) {
+                showMessage(sendMessage, error.message, true);
+            } finally {
+                sendButton.disabled = false;
+            }
+        });
 
         // Excel feltöltése
         uploadForm.addEventListener("submit", async function (event) {
@@ -204,8 +434,8 @@
                 const warningText = (data.warnings || []).join(" ");
                 showMessage(
                     uploadMessage,
-                    `Sikeres feltöltés! ${data.count} mérkőzés feldolgozva.` +
-                        (warningText ? ` Figyelmeztetés: ${warningText}` : ""),
+                    `Sikeres feltöltés! ${data.count} mérkőzés feldolgozva.\n` +
+                    (warningText ? ` Figyelmeztetés: ${warningText}` : ""),
                     false,
                     Boolean(warningText)
                 );
@@ -221,11 +451,6 @@
             }
         });
 
-        // Játékvezetők betöltése
-        document
-            .getElementById("loadRefereesButton")
-            .addEventListener("click", loadReferees);
-
         async function loadReferees() {
             try {
                 const response = await fetch("/referees");
@@ -233,7 +458,7 @@
 
                 if (!data.referees || data.referees.length === 0) {
                     refereesContainer.innerHTML =
-                        "<p>Nincsenek játékvezetők.</p>";
+                        "<p>Még nincsenek játékvezetők.</p>";
                     return;
                 }
 
@@ -246,22 +471,32 @@
                                 <th>Lakhely</th>
                                 <th>Kategória</th>
                                 <th>Autó</th>
+                                <th>Státusz</th>
+                                <th>Tiltott csapatok</th>
+                                <th>Művelet</th>
                             </tr>
                         </thead>
                         <tbody>
                 `;
 
-                data.referees.forEach(referee => {
-                    html += `
+                [...data.referees]
+                    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "hu", { sensitivity: "base" }))
+                    .forEach(referee => {
+                        html += `
                         <tr>
-                            <td>${referee.id}</td>
-                            <td>${referee.name}</td>
-                            <td>${referee.residence}</td>
-                            <td>${referee.cadre}</td>
-                            <td>${referee.has_car ? "Igen" : "Nem"}</td>
+                            <td>${escapeHtml(referee.id)}</td>
+                            <td>${escapeHtml(referee.name)}</td>
+                            <td>${escapeHtml(referee.residence || "")}</td>
+                            <td>${escapeHtml(canonicalCadre(referee.cadre))}</td>
+                            <td>${referee.has_car === null || referee.has_car === undefined ? "—" : referee.has_car ? "Igen" : "Nem"}</td>
+                            <td>${referee.active === false ? "Inaktív" : referee.active === true ? "Aktív" : "—"}</td>
+                            <td>${escapeHtml((referee.banned_teams || []).join(", "))}</td>
+                            <td>
+                                <button type="button" data-edit-referee="${escapeHtml(referee.id)}">Szerkesztés</button>
+                            </td>
                         </tr>
                     `;
-                });
+                    });
 
                 html += `
                         </tbody>
@@ -276,10 +511,112 @@
             }
         }
 
-        // Mérkőzések betöltése
-        document
-            .getElementById("loadMatchesButton")
-            .addEventListener("click", loadMatches);
+        refereeForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const hasCarValue = refereeHasCarInput.value;
+            const payload = {
+                id: refereeIdInput.value.trim(),
+                name: refereeNameInput.value.trim(),
+                residence: refereeResidenceInput.value.trim(),
+                cadre: refereeCadreInput.value,
+                has_car: hasCarValue === "" ? null : hasCarValue === "true",
+                active: refereeActiveInput.value === "true",
+                banned_teams: refereeBannedTeamsInput.value
+                    .split("\n")
+                    .map(team => team.trim())
+                    .filter(Boolean)
+            };
+
+            try {
+                const editing = editingRefereeId !== null;
+                const response = await fetch(
+                    editing ? `/referees/${encodeURIComponent(editingRefereeId)}` : "/referees",
+                    {
+                        method: editing ? "PUT" : "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    }
+                );
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Nem sikerült menteni a játékvezetőt.");
+                }
+
+                showMessage(
+                    refereeMessage,
+                    editing ? "A játékvezető adatai frissültek." : "A játékvezető felvétele sikerült."
+                );
+                resetRefereeForm();
+                await loadReferees();
+            } catch (error) {
+                showMessage(refereeMessage, error.message, true);
+            }
+        });
+
+        refereesContainer.addEventListener("click", async (event) => {
+            const button = event.target.closest("[data-edit-referee]");
+            if (!button) return;
+
+            try {
+                const response = await fetch("/referees");
+                const data = await response.json();
+                const referee = data.referees.find(
+                    item => String(item.id) === button.dataset.editReferee
+                );
+                if (!referee) throw new Error("A játékvezető nem található.");
+
+                editingRefereeId = String(referee.id);
+                refereeIdInput.value = referee.id;
+                refereeIdInput.readOnly = true;
+                refereeNameInput.value = referee.name || "";
+                refereeResidenceInput.value = referee.residence || "";
+                refereeCadreInput.value = canonicalCadre(referee.cadre);
+                refereeHasCarInput.value = referee.has_car === null || referee.has_car === undefined
+                    ? ""
+                    : String(referee.has_car);
+                refereeActiveInput.value = String(referee.active !== false);
+                refereeBannedTeamsInput.value = (referee.banned_teams || []).join("\n");
+                saveRefereeButton.textContent = "Módosítások mentése";
+                cancelRefereeEditButton.classList.remove("hidden");
+                deleteRefereeButton.classList.remove("hidden");
+                refereeMessage.textContent = "Szerkesztés: " + referee.name;
+                refereeMessage.className = "message";
+                refereeForm.scrollIntoView({ behavior: "smooth", block: "start" });
+            } catch (error) {
+                showMessage(refereeMessage, error.message, true);
+            }
+        });
+
+        cancelRefereeEditButton.addEventListener("click", resetRefereeForm);
+
+        deleteRefereeButton.addEventListener("click", async () => {
+            if (editingRefereeId === null) return;
+            if (!window.confirm("Biztosan törlöd ezt a játékvezetőt?")) return;
+
+            try {
+                const response = await fetch(`/referees/${encodeURIComponent(editingRefereeId)}`, {
+                    method: "DELETE"
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Nem sikerült törölni a játékvezetőt.");
+                }
+                resetRefereeForm();
+                showMessage(refereeMessage, data.message || "A játékvezető törlése sikerült.");
+                await loadReferees();
+            } catch (error) {
+                showMessage(refereeMessage, error.message, true);
+            }
+        });
+
+        function resetRefereeForm() {
+            editingRefereeId = null;
+            refereeForm.reset();
+            refereeIdInput.readOnly = false;
+            saveRefereeButton.textContent = "Játékvezető felvétele";
+            cancelRefereeEditButton.classList.add("hidden");
+            deleteRefereeButton.classList.add("hidden");
+        }
 
         async function loadMatches() {
             try {
@@ -313,15 +650,15 @@
                 data.matches.forEach(match => {
                     html += `
                         <tr>
-                            <td>${match.id}</td>
-                            <td>${match.date}</td>
-                            <td>${match.time}</td>
-                            <td>${match.compname}</td>
-                            <td>${match.home_team}</td>
-                            <td>${match.away_team}</td>
-                            <td>${match.location}</td>
-                            <td>${match.required_referees}</td>
-                            <td>${match.required_cadre}</td>
+                            <td>${escapeHtml(match.id)}</td>
+                            <td>${escapeHtml(match.date)}</td>
+                            <td>${escapeHtml(match.time)}</td>
+                            <td>${escapeHtml(match.compname)}</td>
+                            <td>${escapeHtml(match.home_team)}</td>
+                            <td>${escapeHtml(match.away_team)}</td>
+                            <td>${escapeHtml(match.location)}</td>
+                            <td>${escapeHtml(match.required_referees)}</td>
+                            <td>${escapeHtml(match.required_cadre)}</td>
                         </tr>
                     `;
                 });
@@ -346,9 +683,27 @@
                 : isWarning ? "message warning" : "message";
         }
 
-        // Az oldal betöltésekor automatikusan lekérjük az adatokat
-        //loadReferees();
-        //loadMatches();
+        function escapeHtml(value) {
+            return String(value ?? "").replace(/[&<>"']/g, character => ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;"
+            })[character]);
+        }
+
+        function canonicalCadre(value) {
+            const cadres = {
+                "megye1": "Megye 1",
+                "megye2": "Megye 2",
+                "megye3": "Megye 3",
+                "megye_egyeb": "Megye egyéb"
+            };
+            return cadres[String(value || "").trim()] || "";
+        }
+
+        loadReferees();
     </script>
 </body>
 
