@@ -31,6 +31,7 @@ settlements = [
     "Ebes",
     "Egyek",
     "Esztár",
+    "Érmihályfalva",
     "Földes",
     "Folyás",
     "Fülöp",
@@ -77,6 +78,7 @@ settlements = [
     "Sárrétudvari",
     "Szentpéterszeg",
     "Szerep",
+    "Szorgalmatos",
     "Téglás",
     "Tépe",
     "Tetétlen",
@@ -97,7 +99,14 @@ settlements = [
 settlement_nodes = {}
 
 for settlement in settlements:
-    query = f"{settlement}, Hajdú-Bihar, Hungary"
+    if settlement == "Érmihályfalva":
+        query = "Érmihályfalva, Bihor, Romania"
+    elif settlement == "Szorgalmatos":
+        query = "Szorgalmatos, Hungary"
+    else:
+        query = f"{settlement}, Hajdú-Bihar, Hungary"
+
+    lat, lon = ox.geocoder.geocode(query)
     lat, lon = ox.geocoder.geocode(query)
 
     node = ox.distance.nearest_nodes(
