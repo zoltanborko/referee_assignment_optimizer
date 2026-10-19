@@ -51,6 +51,10 @@ def add_done_field(matchlist):
     for match in matchlist:
         match["done"] = False
 
+def add_has_car_field(matchlist):
+    for match in matchlist:
+        match["has_car"] = False
+
 def starting_diff(match1, match2):
     time1 = datetime.strptime(match1["time"], "%H:%M")
     time2 = datetime.strptime(match2["time"], "%H:%M")
@@ -75,16 +79,14 @@ def load_matches():
 
         data = json.load(file)
 
-    return data.get(
-        "matchpool",
-        []
-    )
+    return data.get("match_pool", data.get("matchpool", []))
 
 def create_match_pool(matchlist):
     add_ref_field(matchlist)
     add_assist_field(matchlist)
     add_paired_match_field(matchlist)
     add_done_field(matchlist)
+    add_has_car_field(matchlist)
     for match in matchlist:
         paired_match = find_paired_match(match, matchlist)
         if paired_match:
