@@ -1,6 +1,5 @@
 import json
-from itertools import permutations
-import random
+from itertools import combinations, permutations
 import sys
 from pathlib import Path
 
@@ -21,19 +20,20 @@ with open(DISTANCES_FILE, "r", encoding="utf-8") as file:
 MEGYE_1 = "Megye 1"
 MEGYE_2 = "Megye 2"
 MEGYE_3 = "Megye 3"
+MEGYE_EGYEB = "Megye egyéb"
 
 CADRE_RANKS = {
     MEGYE_1: 1,
     MEGYE_2: 2,
     MEGYE_3: 3,
+    MEGYE_EGYEB: 4,
 }
 REFEREE_CADRE_RANKS = {
     "megye1": 1,
     "megye2": 2,
     "megye3": 3,
+    "megye_egyeb": 4,
 }
-RANDOM_DISTANCE_SLACK_KM = 10.0
-
 referees = load_ref_pool()
 matches = load_matches()
 already_assigned = [
@@ -41,21 +41,6 @@ already_assigned = [
     for match in matches
     if isinstance(match.get("referee"), dict) and match["referee"].get("id") is not None
 ]
-
-def get_towns_by_distance(town):
-    if town not in DISTANCES:
-        raise ValueError(f"Ismeretlen település: {town}")
-
-    town_distances = DISTANCES[town]
-    return sorted(
-        (
-            (other_town, distance)
-            for other_town, distance in town_distances.items()
-            if other_town != town
-        ),
-        key=lambda item: (item[1], item[0].casefold()),
-    )
-
 
 def get_distance_between_towns(origin, destination):
     """Return the road distance in km between two towns."""
@@ -67,27 +52,14 @@ def get_distance_between_towns(origin, destination):
     return float(distance)
 
 
-def get_referees_in_town(town, cadre=None):
-    normalized_town = str(town).strip().casefold()
-    required_rank = CADRE_RANKS.get(cadre, 0)
+def calculate_travel_distance(match_location, *referee_ids):
+    """Return the shortest shared-car route distance for one to three referees."""
+    if not 1 <= len(referee_ids) <= 3:
+        raise ValueError("1–3 játékvezető-azonosítót kell megadni.")
 
-    return [
-        referee
-        for referee in referees
-        if str(referee.get("residence", "")).strip().casefold() == normalized_town
-        and (
-            cadre is None
-            or REFEREE_CADRE_RANKS.get(str(referee.get("cadre", "")).casefold(), 99)
-            <= required_rank
-        )
-    ]
-
-
-def calculate_travel_distance(match_location, referee_id, assistant1_id, assistant2_id):
-    """Return the shortest shared-car route distance in km for a referee trio."""
-    requested_ids = [str(referee_id), str(assistant1_id), str(assistant2_id)]
-    if len(set(requested_ids)) != 3:
-        raise ValueError("A játékvezető és a két asszisztens azonosítója különböző legyen.")
+    requested_ids = [str(referee_id) for referee_id in referee_ids]
+    if len(set(requested_ids)) != len(requested_ids):
+        raise ValueError("A játékvezető-azonosítók különbözőek legyenek.")
 
     referees_by_id = {
         str(referee.get("id")): referee
@@ -99,7 +71,7 @@ def calculate_travel_distance(match_location, referee_id, assistant1_id, assista
 
     trio = [referees_by_id[ref_id] for ref_id in requested_ids]
     if not any(referee.get("has_car") is True for referee in trio):
-        raise ValueError("A hármasban nincs autóval rendelkező játékvezető.")
+        raise ValueError("A stábban nincs autóval rendelkező játékvezető.")
 
     possible_distances = []
     for route_order in permutations(trio):
@@ -119,12 +91,90 @@ def calculate_travel_distance(match_location, referee_id, assistant1_id, assista
     return round(min(possible_distances), 2)
 
 
-def get_matches_by_cadre(required_cadre):
-    return [
-        match
-        for match in matches
-        if match.get("required_cadre") == required_cadre
+def get_assignment_units(match_list):
+    """Group each paired match with its partner; leave unpaired matches alone."""
+    matches_by_id = {match.get("id"): match for match in match_list}
+    seen_match_ids = set()
+    units = []
+
+    for match in match_list:
+        match_id = match.get("id")
+        if match_id in seen_match_ids:
+            continue
+
+        unit = [match]
+        paired_match = matches_by_id.get(match.get("paired_match_id"))
+        if paired_match is not None and paired_match is not match:
+            unit.append(paired_match)
+
+        seen_match_ids.update(member.get("id") for member in unit)
+        units.append(unit)
+
+    return units
+
+
+def find_possible_crews(matches_in_unit, refpool, already_assigned):
+    """Return all valid referee and assistant groups for one match or paired unit."""
+    if not matches_in_unit:
+        return []
+
+    required_count = max(
+        int(match.get("required_referees", 0))
+        for match in matches_in_unit
+    )
+    if required_count < 1:
+        return []
+
+    required_ranks = [
+        CADRE_RANKS.get(match.get("required_cadre"), 0)
+        for match in matches_in_unit
     ]
+    teams = {
+        str(team).strip().casefold()
+        for match in matches_in_unit
+        for team in (match.get("home_team"), match.get("away_team"))
+        if team
+    }
+    available = [
+        referee
+        for referee in refpool
+        if str(referee.get("id")) not in already_assigned
+    ]
+
+    possible_crews = []
+    for main_referee in available:
+        main_rank = REFEREE_CADRE_RANKS.get(
+            str(main_referee.get("cadre", "")).casefold()
+        )
+        if main_rank is None or not all(
+            main_rank <= required_rank for required_rank in required_ranks
+        ):
+            continue
+
+        other_referees = [
+            referee
+            for referee in available
+            if referee.get("id") != main_referee.get("id")
+        ]
+        for assistants in combinations(other_referees, required_count - 1):
+            crew = (main_referee, *assistants)
+            if not any(referee.get("has_car") is True for referee in crew):
+                continue
+            if any(
+                teams.intersection(
+                    str(team).strip().casefold()
+                    for team in referee.get("banned_teams", [])
+                )
+                for referee in crew
+            ):
+                continue
+
+            possible_crews.append({
+                "referee": main_referee,
+                "assistants": list(assistants),
+            })
+
+    return possible_crews
 
 
 def can_assign_all_matches():
@@ -179,80 +229,33 @@ def clear_all_assignments():
     return cleared_count
 
 
-def assign_adult_referees():
-    """Assign one eligible, nearest referee to each unassigned adult match."""
-    global already_assigned
-    results = []
-
-    for cadre in (MEGYE_1, MEGYE_2, MEGYE_3):
-        for match in get_matches_by_cadre(cadre):
-            if str(match.get("age_group", "")).strip().casefold() != "felnőtt":
-                continue
-            if match.get("referee"):
-                continue
-
-            match_town = str(match.get("location", "")).strip()
-            towns = get_towns_by_distance(match_town)
-            if match_town.casefold() == "debrecen":
-                towns.insert(0, (match_town, 0.0))
-
-            candidates = []
-            for town, distance in towns:
-                if town.strip().casefold() == match_town.casefold() and match_town.casefold() != "debrecen":
-                    continue
-                for referee in get_referees_in_town(town, cadre):
-                    if str(referee.get("id")) in already_assigned:
-                        continue
-                    if any(
-                        str(team).strip().casefold() in {
-                            str(match.get("home_team", "")).strip().casefold(),
-                            str(match.get("away_team", "")).strip().casefold(),
-                        }
-                        for team in referee.get("banned_teams", [])
-                    ):
-                        continue
-                    candidates.append((referee, distance))
-
-            selected = None
-            selected_distance = None
-            if candidates:
-                closest_distance = min(distance for _, distance in candidates)
-                nearby_candidates = [
-                    (referee, distance)
-                    for referee, distance in candidates
-                    if distance <= closest_distance + RANDOM_DISTANCE_SLACK_KM
-                ]
-                selected, selected_distance = random.choice(nearby_candidates)
-
-            if selected is None:
-                results.append({"match_id": match.get("id"), "referee": None})
-                continue
-
-            match["referee"] = selected
-            already_assigned.append(str(selected.get("id")))
-            results.append({
-                "match_id": match.get("id"),
-                "referee": selected,
-                "distance_km": selected_distance,
-            })
-
-    save_matchpool(matches)
-    return results
-
-
 if __name__ == "__main__":
-    assignments = assign_adult_referees()
-    for assignment in assignments:
-        referee = assignment["referee"]
-        if referee is None:
-            print(f"Meccs {assignment['match_id']}: nincs megfelelő játékvezető")
-        else:
-            print(
-                f"Meccs {assignment['match_id']}: {referee['name']} "
-                f"({referee['residence']}, {assignment['distance_km']} km)"
-            )
+    assignment_units = get_assignment_units(matches)
+    print(f"Meccsek: {len(matches)}; kiosztási egységek: {len(assignment_units)}")
+    sample_unit = next(
+        (
+            unit
+            for unit in assignment_units
+            if max(int(match.get("required_referees", 0)) for match in unit) > 1
+        ),
+        None,
+    )
+    if sample_unit is None:
+        print("Nincs olyan meccs, amelyhez több játékvezető szükséges.")
+    else:
+        crews = find_possible_crews(sample_unit, referees, already_assigned)
+        match_ids = ", ".join(str(match.get("id")) for match in sample_unit)
+        print(f"Tesztelt meccs(ek): {match_ids}")
+        print(f"Lehetséges stábok száma: {len(crews)}")
 
-    cleared_count = clear_all_assignments()
-    print(f"\nÖsszesen {cleared_count} meccs játékvezető- és asszisztens-hozzárendelése törölve.")
+        for crew in crews[:10]:
+            assistants = ", ".join(
+                referee.get("name", "Ismeretlen")
+                for referee in crew["assistants"]
+            )
+            print(
+                f"Játékvezető: {crew['referee'].get('name', 'Ismeretlen')}; "
+                f"asszisztens(ek): {assistants}"
+            )
 
 
