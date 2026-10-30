@@ -17,7 +17,7 @@ def get_required_referees(comp_name):
     two_referees = {
         "vármegyei u-16 a",
         "vármegyei u-16 b",
-        "vármegyei u15",
+        "vármegyei u-15",
         "vármegyei u-14 a",
         "vármegyei u-14 b",
     }

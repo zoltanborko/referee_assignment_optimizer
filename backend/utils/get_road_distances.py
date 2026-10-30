@@ -7,6 +7,9 @@ import networkx as nx
 G = ox.io.load_graphml(
     "backend/data/road_network.graphml"
 )
+# Distances between settlements are treated as symmetric. The OSM drive graph
+# is directed, which can make a one-way road produce a missing reverse route.
+G = G.to_undirected()
 
 settlements = [
     "Álmosd",
@@ -106,7 +109,6 @@ for settlement in settlements:
     else:
         query = f"{settlement}, Hajdú-Bihar, Hungary"
 
-    lat, lon = ox.geocoder.geocode(query)
     lat, lon = ox.geocoder.geocode(query)
 
     node = ox.distance.nearest_nodes(

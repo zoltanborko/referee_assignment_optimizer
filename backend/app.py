@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request, send_from_directory
 
 from services.excel_import import import_matches_from_excel
-from services.match_service import save_matches, load_matches
+from services.match_service import save_matches
 from services.ref_pool_service import load_ref_pool, set_ref_pool
 from services.referee_service import (
     add_referee,
@@ -9,7 +9,7 @@ from services.referee_service import (
     load_referees,
     update_referee,
 )
-from services.match_pool_service import create_match_pool, save_matchpool
+from services.match_pool_service import create_match_pool, load_matches as load_matchpool_matches
 
 
 app = Flask(__name__)
@@ -146,8 +146,7 @@ def upload_matches():
 
 @app.route("/matches", methods=["GET"])
 def get_matches():
-
-    matches = load_matches()
+    matches = load_matchpool_matches(request.args.get("date"))
 
     return jsonify({
         "matches": matches
