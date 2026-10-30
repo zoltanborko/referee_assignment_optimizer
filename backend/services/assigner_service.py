@@ -1,6 +1,7 @@
 import json
 import random
-from itertools import combinations, groupby, permutations
+from functools import lru_cache
+from itertools import combinations, permutations
 import sys
 from pathlib import Path
 
@@ -36,13 +37,28 @@ REFEREE_CADRE_RANKS = {
     "megye_egyeb": 4,
 }
 referees = load_ref_pool()
+referees_by_id = {str(referee.get("id")): referee for referee in referees}
 matches = load_matches()
-already_assigned = [
-    str(match["referee"].get("id"))
-    for match in matches
-    if isinstance(match.get("referee"), dict) and match["referee"].get("id") is not None
-]
 
+
+def get_assigned_by_date(match_list):
+    """Collect all assigned crew members in date-keyed ID sets."""
+    assigned_by_date = {}
+    for match in match_list:
+        date = str(match.get("date") or "")
+        assigned_by_date.setdefault(date, set())
+        assigned = [match.get("referee"), *(match.get("assistant") or [])]
+        assigned_by_date[date].update(
+            str(referee.get("id"))
+            for referee in assigned
+            if isinstance(referee, dict) and referee.get("id") is not None
+        )
+    return assigned_by_date
+
+
+already_assigned = get_assigned_by_date(matches)
+
+@lru_cache(maxsize=None)
 def get_distance_between_towns(origin, destination):
     """Return the road distance in km between two towns."""
     distance = DISTANCES.get(origin, {}).get(destination)
@@ -53,35 +69,14 @@ def get_distance_between_towns(origin, destination):
     return float(distance)
 
 
-def calculate_travel_distance(match_location, *referee_ids):
-    """Return the shortest shared-car route distance for one to three referees."""
-    if not 1 <= len(referee_ids) <= 3:
-        raise ValueError("1–3 játékvezető-azonosítót kell megadni.")
-
-    requested_ids = [str(referee_id) for referee_id in referee_ids]
-    if len(set(requested_ids)) != len(requested_ids):
-        raise ValueError("A játékvezető-azonosítók különbözőek legyenek.")
-
-    referees_by_id = {
-        str(referee.get("id")): referee
-        for referee in referees
-    }
-    missing_ids = [ref_id for ref_id in requested_ids if ref_id not in referees_by_id]
-    if missing_ids:
-        raise ValueError(f"Nem található játékvezető-azonosító: {', '.join(missing_ids)}")
-
-    trio = [referees_by_id[ref_id] for ref_id in requested_ids]
-    if not any(referee.get("has_car") is True for referee in trio):
-        raise ValueError("A stábban nincs autóval rendelkező játékvezető.")
-
+@lru_cache(maxsize=None)
+def _cached_travel_distance(match_location, participants):
+    """Cache route totals by destination and residence/car combinations."""
     possible_distances = []
-    for route_order in permutations(trio):
-        if route_order[0].get("has_car") is not True:
+    for route_order in permutations(participants):
+        if not route_order[0][1]:
             continue
-        locations = [
-            referee.get("residence", "")
-            for referee in route_order
-        ] + [match_location]
+        locations = [participant[0] for participant in route_order] + [match_location]
         try:
             possible_distances.append(
                 sum(
@@ -96,6 +91,33 @@ def calculate_travel_distance(match_location, *referee_ids):
         raise ValueError("A stábhoz nem található teljes útvonal a távolságadatokban.")
 
     return round(min(possible_distances), 2)
+
+
+def calculate_travel_distance(match_location, *referee_ids):
+    """Return the shortest shared-car route distance for one to three referees."""
+    if not 1 <= len(referee_ids) <= 3:
+        raise ValueError("1–3 játékvezető-azonosítót kell megadni.")
+
+    requested_ids = [str(referee_id) for referee_id in referee_ids]
+    if len(set(requested_ids)) != len(requested_ids):
+        raise ValueError("A játékvezető-azonosítók különbözőek legyenek.")
+
+    missing_ids = [ref_id for ref_id in requested_ids if ref_id not in referees_by_id]
+    if missing_ids:
+        raise ValueError(f"Nem található játékvezető-azonosító: {', '.join(missing_ids)}")
+
+    trio = [referees_by_id[ref_id] for ref_id in requested_ids]
+    if not any(referee.get("has_car") is True for referee in trio):
+        raise ValueError("A stábban nincs autóval rendelkező játékvezető.")
+
+    participants = tuple(sorted(
+        (
+            (referee.get("residence", ""), referee.get("has_car") is True)
+            for referee in trio
+        ),
+        key=lambda participant: (str(participant[0]), participant[1]),
+    ))
+    return _cached_travel_distance(match_location, participants)
 
 
 def get_assignment_units(match_list):
@@ -118,6 +140,10 @@ def get_assignment_units(match_list):
         units.append(unit)
 
     return units
+
+
+def get_unit_dates(unit):
+    return {str(match.get("date") or "") for match in unit}
 
 
 def shift_paired_crew(matches_in_unit, crew):
@@ -157,6 +183,43 @@ def shift_paired_crew(matches_in_unit, crew):
     }
 
 
+def get_match_referee_indices(matches_in_unit):
+    """Return each match's referee index in an ordered crew, without building roles."""
+    if len(matches_in_unit) < 2:
+        return [(matches_in_unit[0], 0)]
+
+    ordered_matches = sorted(
+        matches_in_unit,
+        key=lambda match: match.get("age_group") != "felnőtt",
+    )
+    larger_match = max(
+        ordered_matches,
+        key=lambda match: int(match.get("required_referees", 0)),
+    )
+    smaller_match = next(match for match in ordered_matches if match is not larger_match)
+    larger_count = int(larger_match.get("required_referees", 0))
+    smaller_count = int(smaller_match.get("required_referees", 0))
+
+    if larger_count == smaller_count:
+        first_match, second_match = ordered_matches
+        first_referee_index = 0
+        second_referee_index = (
+            1 if int(first_match.get("required_referees", 0)) > 1 else 0
+        )
+        if first_match is larger_match:
+            larger_index, smaller_index = first_referee_index, second_referee_index
+        else:
+            larger_index, smaller_index = second_referee_index, first_referee_index
+    else:
+        larger_index = 0
+        smaller_index = 1 if smaller_count > 0 else 0
+
+    return [
+        (larger_match, larger_index),
+        (smaller_match, smaller_index),
+    ]
+
+
 def find_possible_crews(matches_in_unit, refpool, already_assigned):
     """Return all valid referee and assistant groups for one match or paired unit."""
     if not matches_in_unit:
@@ -173,6 +236,7 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned):
         match.get("id"): CADRE_RANKS.get(match.get("required_cadre"), 0)
         for match in matches_in_unit
     }
+    match_referee_indices = get_match_referee_indices(matches_in_unit)
     teams = {
         str(team).strip().casefold()
         for match in matches_in_unit
@@ -184,14 +248,21 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned):
         for match in matches_in_unit
         if str(match.get("location", "")).strip().casefold() != "debrecen"
     }
+    already_assigned_ids = set()
+    if isinstance(already_assigned, dict):
+        for date in get_unit_dates(matches_in_unit):
+            already_assigned_ids.update(already_assigned.get(date, set()))
+    else:
+        already_assigned_ids.update(already_assigned)
     available = [
         referee
         for referee in refpool
-        if str(referee.get("id")) not in already_assigned
+        if str(referee.get("id")) not in already_assigned_ids
         and str(referee.get("residence", "")).strip().casefold()
         not in forbidden_residences
     ]
 
+    random.shuffle(available)
     possible_crews = []
     for crew_members in combinations(available, required_count):
         if not any(referee.get("has_car") is True for referee in crew_members):
@@ -205,6 +276,23 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned):
         ):
             continue
 
+        valid_crews = []
+        for ordered_crew in permutations(crew_members):
+            crew = {"referee": ordered_crew[0], "assistants": list(ordered_crew[1:])}
+            if any(
+                (cadre_rank := REFEREE_CADRE_RANKS.get(
+                    str(ordered_crew[referee_index].get("cadre", "")).casefold()
+                )) is None
+                or cadre_rank > required_ranks[match.get("id")]
+                for match, referee_index in match_referee_indices
+            ):
+                continue
+
+            valid_crews.append(crew)
+
+        if not valid_crews:
+            continue
+
         try:
             crew_travel_distance = calculate_travel_distance(
                 matches_in_unit[0].get("location", ""),
@@ -213,99 +301,105 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned):
         except ValueError:
             continue
 
-        for ordered_crew in permutations(crew_members):
-            crew = {"referee": ordered_crew[0], "assistants": list(ordered_crew[1:])}
-            match_roles = shift_paired_crew(matches_in_unit, crew)
-            if any(
-                (cadre_rank := REFEREE_CADRE_RANKS.get(
-                    str(match_roles[match.get("id")]["referee"].get("cadre", "")).casefold()
-                )) is None
-                or cadre_rank > required_ranks[match.get("id")]
-                for match in matches_in_unit
-            ):
-                continue
-
-            possible_crews.append({
-                "referee": crew["referee"],
-                "assistants": crew["assistants"],
-                "travel_distance": crew_travel_distance,
-            })
+        possible_crews.extend({
+            **crew,
+            "travel_distance": crew_travel_distance,
+        } for crew in valid_crews)
 
     return possible_crews
 
 
 def assign_all_matches(save=True):
-    """Find a complete, distance-preferred assignment and save it if requested."""
-    global already_assigned, matches, referees
+    """Find a complete assignment, or save a greedy partial assignment."""
+    global already_assigned, matches, referees, referees_by_id
 
     match_list = load_matches()
     referees = load_ref_pool()
+    referees_by_id = {str(referee.get("id")): referee for referee in referees}
     units = get_assignment_units(match_list)
 
-    # This assignment run starts with an unassigned pool, as required by the
-    # current workflow. The search tracks reservations locally while backtracking.
+    # This assignment run starts with an unassigned pool. The search tracks
+    # reservations locally while backtracking.
     used_ids = set()
     unit_options = []
+    candidates_by_unit = {}
     for index, unit in enumerate(units):
         possible_crews = find_possible_crews(unit, referees, used_ids)
-        if not possible_crews:
-            match_ids = ", ".join(str(match.get("id")) for match in unit)
-            return {
-                "success": False,
-                "message": f"A(z) {match_ids} meccsegységhez nincs érvényes stáb.",
-            }
+        candidates_by_distance = {}
+        for crew in possible_crews:
+            candidates_by_distance.setdefault(crew["travel_distance"], []).append(crew)
+        randomized_candidates = []
+        for distance in sorted(candidates_by_distance):
+            tied_crews = candidates_by_distance[distance]
+            random.shuffle(tied_crews)
+            randomized_candidates.extend(tied_crews)
+        candidates_by_unit[index] = randomized_candidates
         unit_options.append((len(possible_crews), index))
 
     unit_order = [index for _, index in sorted(unit_options)]
     chosen_crews = {}
 
-    def search(position, reserved_ids):
+    unit_dates = [get_unit_dates(unit) for unit in units]
+
+    def search(position, reserved_by_date):
         if position == len(unit_order):
             return True
 
         unit_index = unit_order[position]
-        unit = units[unit_index]
-        candidates = find_possible_crews(unit, referees, reserved_ids)
-        candidates.sort(
-            key=lambda crew: (
-                crew["travel_distance"],
-                str(crew["referee"].get("id")),
-                tuple(str(referee.get("id")) for referee in crew["assistants"]),
-            )
-        )
-        randomized_candidates = []
-        for _, tied_crews in groupby(
-            candidates,
-            key=lambda crew: crew["travel_distance"],
-        ):
-            tied_crews = list(tied_crews)
-            random.shuffle(tied_crews)
-            randomized_candidates.extend(tied_crews)
-        candidates = randomized_candidates
-
-        for crew in candidates:
+        for crew in candidates_by_unit[unit_index]:
             crew_ids = {
                 str(crew["referee"].get("id")),
                 *(str(referee.get("id")) for referee in crew["assistants"]),
             }
-            if crew_ids & reserved_ids:
+            dates = unit_dates[unit_index]
+            if any(crew_ids & reserved_by_date.get(date, set()) for date in dates):
                 continue
 
             chosen_crews[unit_index] = crew
-            if search(position + 1, reserved_ids | crew_ids):
+            next_reserved = dict(reserved_by_date)
+            for date in dates:
+                next_reserved[date] = reserved_by_date.get(date, set()) | crew_ids
+            if search(position + 1, next_reserved):
                 return True
             del chosen_crews[unit_index]
 
         return False
 
-    if not search(0, used_ids):
-        return {
-            "success": False,
-            "message": "Nem található teljes, ütközésmentes játékvezetői kiosztás.",
-        }
+    capacity_sufficient = can_assign_all_matches(match_list, referees)
+    complete = (
+        capacity_sufficient
+        and all(count for count, _ in unit_options)
+        and search(0, {})
+    )
+    search = None  # Break its self-reference cycle before returning.
+
+    if not complete:
+        chosen_crews.clear()
+        reserved_by_date = {}
+        for unit_index in unit_order:
+            dates = unit_dates[unit_index]
+            for crew in candidates_by_unit[unit_index]:
+                crew_ids = {
+                    str(crew["referee"].get("id")),
+                    *(str(referee.get("id")) for referee in crew["assistants"]),
+                }
+                if all(
+                    crew_ids.isdisjoint(reserved_by_date.get(date, set()))
+                    for date in dates
+                ):
+                    chosen_crews[unit_index] = crew
+                    for date in dates:
+                        reserved_by_date.setdefault(date, set()).update(crew_ids)
+                    break
 
     assignments = []
+    for match in match_list:
+        match["referee"] = None
+        match["assistant"] = []
+
     for unit_index, unit in enumerate(units):
+        if unit_index not in chosen_crews:
+            continue
         crew = chosen_crews[unit_index]
         match_roles = shift_paired_crew(unit, crew)
         match_assignments = []
@@ -325,14 +419,20 @@ def assign_all_matches(save=True):
             "travel_distance": crew["travel_distance"],
         })
 
-    assigned_ids = [
-        str(referee.get("id"))
-        for crew in chosen_crews.values()
-        for referee in (crew["referee"], *crew["assistants"])
+    missing_matches = [
+        match
+        for unit_index, unit in enumerate(units)
+        if unit_index not in chosen_crews
+        for match in unit
     ]
+    missing_match_ids = [match.get("id") for match in missing_matches]
     result = {
-        "success": True,
+        "success": complete,
+        "partial": bool(assignments) and not complete,
+        "capacity_sufficient": capacity_sufficient,
         "assignments": assignments,
+        "missing_matches": missing_matches,
+        "missing_match_ids": missing_match_ids,
         "total_travel_distance": round(
             sum(assignment["travel_distance"] for assignment in assignments),
             2,
@@ -340,47 +440,32 @@ def assign_all_matches(save=True):
     }
 
     if save:
-        save_matchpool(match_list)
+        save_matchpool(match_list, missing_match_ids)
         matches = match_list
         already_assigned.clear()
-        already_assigned.extend(assigned_ids)
+        already_assigned.update(get_assigned_by_date(match_list))
 
     return result
 
 
-def can_assign_all_matches():
-    """Return whether the referee pool can cover all matches, counting each pair once."""
-    matches_by_id = {match.get("id"): match for match in matches}
-    counted_pairs = set()
-    required_count = 0
-    required_cars = 0
-    ref_cars = 0
+def can_assign_all_matches(match_list=None, refpool=None):
+    """Check referee and car capacity independently for every match date."""
+    match_list = matches if match_list is None else match_list
+    refpool = referees if refpool is None else refpool
+    required_by_date = {}
+    cars_by_date = {}
+    ref_cars = sum(referee.get("has_car") is True for referee in refpool)
 
-    for match in matches:
-        paired_id = match.get("paired_match_id")
-        required = int(match.get("required_referees", 0))
+    for unit in get_assignment_units(match_list):
+        required = max(int(match.get("required_referees", 0)) for match in unit)
+        for date in get_unit_dates(unit):
+            required_by_date[date] = required_by_date.get(date, 0) + required
+            cars_by_date[date] = cars_by_date.get(date, 0) + 1
 
-        if paired_id is None:
-            required_count += required
-            required_cars += 1
-            continue
-
-        pair = frozenset((match.get("id"), paired_id))
-        if pair in counted_pairs:
-            continue
-        counted_pairs.add(pair)
-        required_cars += 1
-
-        paired_match = matches_by_id.get(paired_id)
-        if paired_match:
-            required = max(required, int(paired_match.get("required_referees", 0)))
-        required_count += required
-
-    for referee in referees:
-        if referee.get("has_car") is True:
-            ref_cars += 1
-
-    return required_count <= len(referees) and required_cars <= ref_cars
+    return all(
+        required <= len(refpool) and cars_by_date[date] <= ref_cars
+        for date, required in required_by_date.items()
+    )
 
 
 def clear_all_assignments():
@@ -395,30 +480,32 @@ def clear_all_assignments():
         match["referee"] = None
         match["assistant"] = []
 
-    save_matchpool(matches)
+    save_matchpool(matches, [])
     already_assigned.clear()
     return cleared_count
 
 
 if __name__ == "__main__":
     result = assign_all_matches()
-    if not result["success"]:
-        print(f"A hozzárendelés sikertelen: {result['message']}")
-    else:
-        print(f"Sikeres hozzárendelés: {len(result['assignments'])} kiosztási egység.")
-        for assignment in result["assignments"]:
-            for match_assignment in assignment["match_assignments"]:
-                assistants = ", ".join(
-                    referee.get("name", "Ismeretlen")
-                    for referee in match_assignment["assistants"]
-                ) or "nincs"
-                print(
-                    f"Meccs {match_assignment['match_id']}: "
-                    f"{match_assignment['referee'].get('name', 'Ismeretlen')}; "
-                    f"asszisztens(ek): {assistants}; "
-                    f"egység utazása: {assignment['travel_distance']} km"
-                )
-        print(f"Összesített utazási távolság: {result['total_travel_distance']} km")
-        print("A hozzárendelés elmentve a match_pool.json fájlba.")
+    state = "Sikeres" if result["success"] else "Részleges" if result["partial"] else "Sikertelen"
+    print(f"{state} hozzárendelés: {len(result['assignments'])} kiosztási egység.")
+    for assignment in result["assignments"]:
+        for match_assignment in assignment["match_assignments"]:
+            assistants = ", ".join(
+                referee.get("name", "Ismeretlen")
+                for referee in match_assignment["assistants"]
+            ) or "nincs"
+            print(
+                f"Meccs {match_assignment['match_id']}: "
+                f"{match_assignment['referee'].get('name', 'Ismeretlen')}; "
+                f"asszisztens(ek): {assistants}; "
+                f"egység utazása: {assignment['travel_distance']} km"
+            )
+    if result["missing_match_ids"]:
+        print("Kiosztatlan meccsek: " + ", ".join(map(str, result["missing_match_ids"])))
+    if not result["capacity_sufficient"]:
+        print("A teljes kiosztás a játékvezetői létszám vagy az autók száma miatt nem lehetséges.")
+    print(f"Összesített utazási távolság: {result['total_travel_distance']} km")
+    print("Az eredmény elmentve a match_pool.json fájlba.")
 
 

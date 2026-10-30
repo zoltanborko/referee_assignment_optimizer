@@ -17,7 +17,10 @@ age_group_mapping = {
     "felnőtt": 2
 }
 
-def save_matchpool(matchlist):
+def save_matchpool(matchlist, unassigned_match_ids=None):
+    if unassigned_match_ids is None and MATCH_POOL_FILE.exists():
+        with open(MATCH_POOL_FILE, "r", encoding="utf-8") as file:
+            unassigned_match_ids = json.load(file).get("unassigned_match_ids", [])
 
     with open(
         MATCH_POOL_FILE,
@@ -27,7 +30,8 @@ def save_matchpool(matchlist):
 
         json.dump(
             {
-                "match_pool": matchlist
+                "match_pool": matchlist,
+                "unassigned_match_ids": unassigned_match_ids or [],
             },
             file,
             ensure_ascii=False,
@@ -91,4 +95,4 @@ def create_match_pool(matchlist):
         paired_match = find_paired_match(match, matchlist)
         if paired_match:
             match["paired_match_id"] = paired_match["id"]
-    save_matchpool(matchlist)
+    save_matchpool(matchlist, [])
