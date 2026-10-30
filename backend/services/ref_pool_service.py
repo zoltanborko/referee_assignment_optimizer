@@ -14,16 +14,29 @@ def load_ref_pool():
     with open(REF_POOL_FILE, "r", encoding="utf-8") as file:
         pool_data = json.load(file)
 
-    # Accept the old ID-only format so existing installations keep working.
-    referees = pool_data.get("referees")
-    if referees is None:
-        referee_ids = pool_data.get("referee_ids", [])
-        id_set = {str(referee_id) for referee_id in referee_ids}
-        return [
-            referee for referee in load_referees()
-            if referee.get("active") is True and str(referee.get("id")) in id_set
-        ]
-    return referees
+    # Keep selected IDs in ref_pool.json, but always use current master data.
+    selected_referees = pool_data.get("referees")
+    if selected_referees is None:
+        selected_ids = {str(referee_id) for referee_id in pool_data.get("referee_ids", [])}
+    else:
+        selected_ids = {
+            str(referee.get("id"))
+            for referee in selected_referees
+            if isinstance(referee, dict) and referee.get("id") is not None
+        }
+
+    return [
+        referee for referee in load_referees()
+        if referee.get("active") is True and str(referee.get("id")) in selected_ids
+    ]
+
+
+def load_ref_pool_for_date(match_date):
+    """Return selected active referees who have not declined this date."""
+    return [
+        referee for referee in load_ref_pool()
+        if match_date not in (referee.get("unavailable_dates") or [])
+    ]
 
 
 def set_ref_pool(referee_ids):

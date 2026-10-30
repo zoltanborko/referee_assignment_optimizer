@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 
 
@@ -34,6 +35,7 @@ def normalize_referee(data):
     has_car = data.get("has_car")
     active = data.get("active")
     banned_teams = data.get("banned_teams", [])
+    unavailable_dates = data.get("unavailable_dates", [])
 
     if not referee_id:
         raise ValueError("Az azonosító megadása kötelező.")
@@ -49,6 +51,22 @@ def normalize_referee(data):
         isinstance(team, str) for team in banned_teams
     ):
         raise ValueError("A tiltott csapatokat listaként kell megadni.")
+    if not isinstance(unavailable_dates, list) or not all(
+        isinstance(unavailable_date, str) for unavailable_date in unavailable_dates
+    ):
+        raise ValueError("A nem elérhető dátumokat YYYY-MM-DD formátumú listaként kell megadni.")
+
+    normalized_unavailable_dates = []
+    for unavailable_date in unavailable_dates:
+        unavailable_date = unavailable_date.strip()
+        try:
+            valid_date = date.fromisoformat(unavailable_date)
+        except ValueError as error:
+            raise ValueError("A nem elérhető dátumokat YYYY-MM-DD formátumban kell megadni.") from error
+        if valid_date.isoformat() != unavailable_date:
+            raise ValueError("A nem elérhető dátumokat YYYY-MM-DD formátumban kell megadni.")
+        if unavailable_date not in normalized_unavailable_dates:
+            normalized_unavailable_dates.append(unavailable_date)
 
     return {
         "id": referee_id,
@@ -59,6 +77,7 @@ def normalize_referee(data):
         "banned_teams": list(dict.fromkeys(
             team.strip() for team in banned_teams if team.strip()
         )),
+        "unavailable_dates": normalized_unavailable_dates,
         "active": active,
     }
 
@@ -81,7 +100,14 @@ def update_referee(referee_id, data):
     referees = load_referees()
     for index, current in enumerate(referees):
         if str(current.get("id")) == str(referee_id):
-            referee = normalize_referee({**data, "id": current["id"]})
+            referee = normalize_referee({
+                **data,
+                "id": current["id"],
+                "unavailable_dates": data.get(
+                    "unavailable_dates",
+                    current.get("unavailable_dates", []),
+                ),
+            })
             referees[index] = referee
             save_referees(referees)
             return referee
