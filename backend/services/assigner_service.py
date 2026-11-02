@@ -12,6 +12,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from services.match_pool_service import (
+    create_assignment_draft,
+    get_upload,
     get_match_dates,
     load_matches,
     migrate_legacy_matchpool,
@@ -440,6 +442,7 @@ def _assign_matches_for_date(match_date, save=True):
         "assignments": assignments,
         "missing_matches": missing_matches,
         "missing_match_ids": missing_match_ids,
+        "matches": match_list,
         "total_travel_distance": round(
             sum(assignment["travel_distance"] for assignment in assignments),
             2,
@@ -493,6 +496,62 @@ def assign_all_matches(save=True, match_date=None):
             2,
         ),
     }
+
+
+def assign_upload(upload_id, owner_id=None):
+    """Create a new draft assignment version for one uploaded workbook."""
+    upload = get_upload(upload_id, owner_id)
+    if upload is None:
+        return None
+
+    date_results = {}
+    date_matches = {}
+    for match_date in upload["dates"]:
+        result = _assign_matches_for_date(match_date, save=False)
+        date_results[match_date] = result
+        date_matches[match_date] = result["matches"]
+
+    results = list(date_results.values())
+    summary = {
+        "success": all(result["success"] for result in results),
+        "partial": any(result["partial"] for result in results),
+        "capacity_sufficient": all(
+            result["capacity_sufficient"] for result in results
+        ),
+        "assignments": [
+            assignment
+            for result in results
+            for assignment in result["assignments"]
+        ],
+        "missing_match_ids": [
+            match_id
+            for result in results
+            for match_id in result["missing_match_ids"]
+        ],
+        "total_travel_distance": round(
+            sum(result["total_travel_distance"] for result in results), 2
+        ),
+    }
+    summary["assigned_count"] = sum(
+        isinstance(match.get("referee"), dict)
+        for matches_for_date in date_matches.values()
+        for match in matches_for_date
+    )
+    summary["unassigned_count"] = sum(
+        not isinstance(match.get("referee"), dict)
+        for matches_for_date in date_matches.values()
+        for match in matches_for_date
+    )
+    version_id = create_assignment_draft(upload_id, date_matches, summary)
+    summary["upload_id"] = upload_id
+    summary["version_id"] = version_id
+    summary["date_results"] = {
+        match_date: {
+            key: value for key, value in result.items() if key != "matches"
+        }
+        for match_date, result in date_results.items()
+    }
+    return summary
 
 
 def can_assign_all_matches(match_list=None, refpool=None):
