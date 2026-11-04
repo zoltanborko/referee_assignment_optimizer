@@ -87,7 +87,10 @@ def get_match_dates():
 
 
 def get_upload(upload_id, owner_id=None):
-    query = """SELECT uploads.*, users.username AS created_by_username
+    query = """SELECT uploads.upload_id, uploads.created_by, uploads.source_filename,
+    uploads.status, uploads.created_at,
+    (uploads.source_file IS NOT NULL) AS has_source_file,
+    users.username AS created_by_username
     FROM uploads LEFT JOIN users ON users.user_id = uploads.created_by
     WHERE uploads.upload_id = ?"""
     parameters = [upload_id]
@@ -127,6 +130,7 @@ def get_upload(upload_id, owner_id=None):
                     unused["match_date"], []
                 ).append({"id": unused["referee_id"], "name": unused["referee_name"]})
     info = dict(row)
+    info["has_source_file"] = bool(info["has_source_file"])
     info["dates"] = [date_row["match_date"] for date_row in dates]
     version_data = []
     for version in versions:
@@ -136,6 +140,14 @@ def get_upload(upload_id, owner_id=None):
     info["draft"] = next((version for version in version_data if version["status"] == "draft"), None)
     info["published"] = next((version for version in version_data if version["status"] == "published"), None)
     return info
+
+
+def get_upload_source_file(upload_id):
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT source_file FROM uploads WHERE upload_id = ?", (upload_id,)
+        ).fetchone()
+    return row["source_file"] if row else None
 
 
 def get_upload_referee_exclusions(upload_id):
@@ -507,7 +519,7 @@ def find_paired_match(match, matchlist):
     return None
 
 
-def create_match_pool(matchlist, created_by=None, source_filename=None):
+def create_match_pool(matchlist, created_by=None, source_filename=None, source_file=None):
     add_ref_field(matchlist)
     add_assist_field(matchlist)
     add_paired_match_field(matchlist)
@@ -549,8 +561,15 @@ def create_match_pool(matchlist, created_by=None, source_filename=None):
                     "A teljes Excel-fájlt nem mentettük el."
                 )
             cursor = connection.execute(
-                "INSERT INTO uploads(created_by, source_filename, status, created_at) VALUES (?, ?, 'draft', ?)",
-                (created_by, source_filename, datetime.now(timezone.utc).isoformat()),
+                """INSERT INTO uploads(
+                    created_by, source_filename, source_file, status, created_at
+                ) VALUES (?, ?, ?, 'draft', ?)""",
+                (
+                    created_by,
+                    source_filename,
+                    source_file,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
             upload_id = cursor.lastrowid
             for match_date, date_matches in matches_by_date.items():

@@ -2,8 +2,8 @@ import { api, dateLabel, emptyState, escapeHtml, matchTable } from "./api.js";
 
 export async function renderSender(user, renderPage) {
   renderPage(user, `<div class="page-heading"><div><p class="eyebrow">Küldés kezelése</p><h1>Feltöltések és kiosztások</h1><p>Tölts fel mérkőzéseket, készíts kiosztási piszkozatot, majd véglegesítsd a küldést.</p></div></div>
-    <div class="grid"><section class="card span-12"><div class="card-head"><h2>Új Excel-feltöltés</h2><span class="badge">.xlsx vagy .xls</span></div>
-      <form id="upload-form" class="inline"><input id="excel-file" type="file" accept=".xlsx,.xls" required><button class="button">Excel feltöltése</button></form><div id="upload-message"></div>
+    <div class="grid"><section class="card span-12"><div class="card-head"><h2>Új Excel-feltöltés</h2><span class="badge">.xlsx</span></div>
+      <form id="upload-form" class="inline"><input id="excel-file" type="file" accept=".xlsx" required><button class="button">Excel feltöltése</button></form><div id="upload-message"></div>
       <p class="helper">Ha a fájl bármelyik dátumára már van feltöltés, a teljes Excel elutasításra kerül.</p></section>
       <section class="card span-12"><div class="card-head"><div><h2>Feltöltött mérkőzések</h2><p class="muted small">A piszkozat csak neked látható; a játékvezetők a véglegesített küldést látják.</p></div><button class="button secondary small-button" id="refresh-uploads">Frissítés</button></div><div id="uploads"></div></section>
       <section class="card span-12"><div class="card-head"><h2>Figyelmeztetések</h2><button class="button secondary small-button" id="refresh-notifications">Frissítés</button></div><div id="notifications"></div></section></div>`);
@@ -76,6 +76,7 @@ export function uploadCard(upload) {
     <div class="actions"><button class="button secondary small-button" data-upload-detail="${upload.upload_id}">Meccsek megtekintése</button>
       <button class="button secondary small-button" data-upload-cancellations="${upload.upload_id}">Lemondások megtekintése</button>
       ${canManage ? `<button class="button secondary small-button" data-upload-exclusions="${upload.upload_id}">Letiltás</button>` : ""}
+      ${canManage && current && upload.has_source_file ? `<a class="button secondary small-button" href="/uploads/${upload.upload_id}/export">Kitöltött Excel letöltése</a>` : ""}
       ${canManage ? `<button class="button small-button" data-upload-action="assign" data-id="${upload.upload_id}">Kiosztás keresése</button>` : ""}
       ${canManage && draft ? `<button class="button small-button" data-upload-action="finalize" data-id="${upload.upload_id}" ${draft.assigned_count ? "" : "disabled"}>Véglegesítés</button>` : ""}
       ${canManage ? `<button class="button danger small-button" data-upload-action="delete" data-id="${upload.upload_id}">Törlés</button>` : ""}</div></div>${unusedReferees ? `<div class="upload-details">${unusedReferees}</div>` : ""}<div class="divider"></div><div class="upload-details hidden" id="detail-${upload.upload_id}"></div><div class="upload-details hidden" id="cancellations-${upload.upload_id}"></div><div class="upload-details hidden" id="exclusions-${upload.upload_id}"></div></article>`;

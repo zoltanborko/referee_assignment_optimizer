@@ -226,6 +226,11 @@ def import_matches_from_excel(file):
         "id",
         range(1, len(matches_df) + 1)
     )
+    matches_df.insert(
+        1,
+        "excel_row",
+        [int(index + 9) for index in matches_df.index]
+    )
 
     # -----------------------------------------------------
     # Dátum
@@ -297,6 +302,7 @@ def import_matches_from_excel(file):
     matches_df = matches_df[
         [
             "id",
+            "excel_row",
             "date",
             "time",
             #"comptype",

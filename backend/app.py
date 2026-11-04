@@ -2,9 +2,11 @@ import hmac
 import os
 import secrets
 from datetime import timedelta
+from io import BytesIO
 from pathlib import Path
 
-from flask import Flask, g, jsonify, request, send_from_directory, session
+from flask import Flask, g, jsonify, request, send_file, send_from_directory, session
+from werkzeug.utils import secure_filename
 
 from auth import roles_required
 from services.auth_service import (
@@ -17,6 +19,7 @@ from services.auth_service import (
 )
 
 from services.excel_import import import_matches_from_excel
+from services.excel_export import fill_assignment_workbook
 from services.ref_pool_service import load_ref_pool, load_ref_pool_for_date, set_ref_pool
 from services.referee_service import (
     add_referee,
@@ -30,6 +33,7 @@ from services.match_pool_service import (
     delete_upload,
     finalize_upload,
     get_upload,
+    get_upload_source_file,
     list_uploads,
     load_upload_matches,
     list_notifications,
@@ -335,19 +339,20 @@ def upload_matches():
             "error": "Nincs kiválasztott fájl."
         }), 400
 
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
+    if not file.filename.lower().endswith(".xlsx"):
         return jsonify({
-            "error": "Csak Excel-fájl tölthető fel."
+            "error": "Csak .xlsx fájl tölthető fel."
         }), 400
 
     try:
-
-        matches, warnings = import_matches_from_excel(file)
+        source_file = file.read()
+        matches, warnings = import_matches_from_excel(BytesIO(source_file))
 
         upload_id = create_match_pool(
             matches,
             created_by=g.user["user_id"],
             source_filename=file.filename,
+            source_file=source_file,
         )
 
         return jsonify({
@@ -400,6 +405,35 @@ def get_upload_detail(upload_id):
         return jsonify({"error": "A feltöltés nem található."}), 404
     upload["matches"] = load_upload_matches(upload_id)
     return jsonify({"upload": upload})
+
+
+@app.route("/uploads/<int:upload_id>/export", methods=["GET"])
+@roles_required("admin", "sender")
+def export_upload_assignment(upload_id):
+    owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
+    upload = get_upload(upload_id, owner_id)
+    if upload is None:
+        return jsonify({"error": "A feltöltés nem található."}), 404
+    if not upload.get("has_source_file"):
+        return jsonify({"error": "Ehhez a régi feltöltéshez nem áll rendelkezésre az eredeti Excel."}), 409
+    if not upload.get("draft") and not upload.get("published"):
+        return jsonify({"error": "Előbb készíts kiosztást az Excel letöltéséhez."}), 409
+
+    try:
+        workbook = fill_assignment_workbook(
+            get_upload_source_file(upload_id), load_upload_matches(upload_id)
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 409
+
+    source_name = secure_filename(upload.get("source_filename") or "kiosztas.xlsx")
+    filename = f"{Path(source_name).stem.rstrip(' .') or 'kiosztas'}_kiosztott.xlsx"
+    return send_file(
+        workbook,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @app.route("/uploads/<int:upload_id>/referee-exclusions", methods=["GET"])

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS uploads (
     upload_id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_by INTEGER REFERENCES users(user_id),
     source_filename TEXT,
+    source_file BLOB,
     status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'finalized')),
     created_at TEXT NOT NULL
 );
@@ -223,6 +224,12 @@ def initialize_database():
         connection = _connect()
         try:
             connection.executescript(SCHEMA)
+            upload_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(uploads)")
+            }
+            if "source_file" not in upload_columns:
+                connection.execute("ALTER TABLE uploads ADD COLUMN source_file BLOB")
+                connection.commit()
             connection.execute("PRAGMA journal_mode = WAL")
             migration_done = connection.execute(
                 "SELECT 1 FROM schema_migrations WHERE migration_key = ?",
