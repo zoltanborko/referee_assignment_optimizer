@@ -1,4 +1,5 @@
 import json
+import math
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -11,6 +12,8 @@ age_group_mapping = {
     "U-14": 1,
     "U-15": 1,
     "U-16": 1,
+    "U-17": 1,
+    "U-18": 1,
     "U-19": 2,
     "U-21": 2,
     "felnőtt": 2,
@@ -211,7 +214,13 @@ def load_upload_matches(upload_id, match_date=None):
             parameters.append(match_date)
         query += " ORDER BY match_date, position"
         rows = connection.execute(query, parameters).fetchall()
-    return [json.loads(row["match_json"]) for row in rows]
+    matches = [json.loads(row["match_json"]) for row in rows]
+    for match in matches:
+        location = match.get("location")
+        if isinstance(location, float) and math.isnan(location):
+            # Repair rows imported before unknown Hajdú-Bihar locations fell back to Debrecen.
+            match["location"] = "Debrecen"
+    return matches
 
 
 def create_assignment_draft(upload_id, date_matches, result, unused_referees_by_date=None):
@@ -509,6 +518,7 @@ def find_paired_match(match, matchlist):
     for other_match in matchlist:
         if (
             other_match["id"] != match["id"]
+            and other_match["time"] != match["time"]
             and other_match["date"] == match["date"]
             and starting_diff(match, other_match) <= timedelta(hours=3)
             and age_group_mapping[match["age_group"]] == age_group_mapping[other_match["age_group"]]

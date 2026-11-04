@@ -1,5 +1,16 @@
-import pandas as pd
+import json
 import re
+from pathlib import Path
+
+import pandas as pd
+
+
+DISTANCES_FILE = Path(__file__).parent.parent / "data" / "distances.json"
+with DISTANCES_FILE.open("r", encoding="utf-8") as file:
+    DISTANCE_TOWNS_BY_KEY = {
+        str(town).strip().casefold().strip(" ,.;"): str(town)
+        for town in json.load(file)
+    }
 
 
 # ---------------------------------------------------------
@@ -28,8 +39,10 @@ def get_required_referees(comp_name):
         "vármegyei u-13 c",
         "vármegyei u-13 m",
         "vármegyei u-13 n",
-        "mlsz regionális u-12",
-        "mlsz regionális u-13",
+        "mlsz regionális u-12 északkeleti csoport",
+        "mlsz regionális u-13 északkeleti csoport",
+        "mlsz országos u12 észak-kelet",
+        "mlsz országos u13 észak-kelet"
     }
 
     if comp_name in two_referees:
@@ -129,18 +142,6 @@ def import_matches_from_excel(file):
         )
 
     # -----------------------------------------------------
-    # Csak Hajdú-Bihar
-    # -----------------------------------------------------
-
-    df = df[
-        df["Megye Név"]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        == "hajdú-bihar"
-    ].copy()
-
-    # -----------------------------------------------------
     # Törölt mérkőzések kihagyása
     # -----------------------------------------------------
 
@@ -153,6 +154,41 @@ def import_matches_from_excel(file):
             na=False
         )
     ].copy()
+
+    df = df[
+        ~df["Korosztály"]
+        .astype(str)
+        .str.contains(
+            r"(?<!\w)U-(?:6|7|8|9|10|11)(?!\d)",
+            regex=True,
+            case=False,
+            na=False
+        )
+    ]
+
+    # A Hajdú-Biharban szervezett meccsek mind bekerülnek. Más megyéből
+    # csak azokat vesszük fel, amelyek helyszíne szerepel a távolságmátrixban.
+    county_is_hajdu_bihar = (
+        df["Megye Név"].astype(str).str.strip().str.casefold() == "hajdú-bihar"
+    )
+    locations = df["Cím"].apply(extract_settlement)
+    canonical_locations = locations.map(
+        lambda town: DISTANCE_TOWNS_BY_KEY.get(
+            str(town).strip().casefold().strip(" ,.;")
+        )
+    )
+    location_is_in_matrix = canonical_locations.notna()
+    accepted_matches = county_is_hajdu_bihar | location_is_in_matrix
+    fallback_to_debrecen = county_is_hajdu_bihar & ~location_is_in_matrix
+    fallback_matches = df.loc[fallback_to_debrecen, ["Cím"]].copy()
+    fallback_matches["excel_row"] = [
+        int(index + 9) for index in fallback_matches.index
+    ]
+    excluded_matches = df.loc[~accepted_matches, ["Cím"]].copy()
+    excluded_matches["excel_row"] = [int(index + 9) for index in excluded_matches.index]
+    resolved_locations = canonical_locations.copy()
+    resolved_locations.loc[fallback_to_debrecen] = "Debrecen"
+    df = df.loc[accepted_matches].copy()
 
     # -----------------------------------------------------
     # Csak a rendszer számára szükséges adatok
@@ -255,9 +291,7 @@ def import_matches_from_excel(file):
     # Település
     # -----------------------------------------------------
 
-    matches_df["Helyszín"] = matches_df["Cím"].apply(
-        extract_settlement
-    )
+    matches_df["Helyszín"] = resolved_locations.loc[matches_df.index]
 
     # -----------------------------------------------------
     # Szükséges játékvezetők
@@ -305,7 +339,6 @@ def import_matches_from_excel(file):
             "excel_row",
             "date",
             "time",
-            #"comptype",
             "compname",
             "age_group",
             "home_team",
@@ -316,18 +349,31 @@ def import_matches_from_excel(file):
         ]
     ]
 
-    # NaN → üres string
-    #matches_df = matches_df.fillna("")
-
     matches = matches_df.to_dict(orient="records")
     warnings = []
     if missing_address_rows:
         rows = ", ".join(str(row) for row in missing_address_rows)
         warnings.append(
             "Néhány mérkőzésnél üres a Cím mező "
-            f"(Excel sorok: {rows}). Ha ismert, töltsd ki csak a település nevével, így: "
+            f"(Excel sorok: {rows}). Ha ismert, töltsd ki csak a település nevével, például így: "
             "Földes. A hiányzó című mérkőzéseknél a program "
             "Debrecen településsel számol."
+        )
+    if not excluded_matches.empty:
+        rows = ", ".join(str(row) for row in excluded_matches["excel_row"])
+        towns = sorted({extract_settlement(address) for address in excluded_matches["Cím"]})
+        warnings.append(
+            "A nem Hajdú-Biharban szervezett mérkőzések közül kihagytuk azokat, "
+            "amelyek helyszíne nem szerepel a távolságmátrixban "
+            f"(Excel sorok: {rows}; települések: {', '.join(towns)})."
+        )
+    if not fallback_matches.empty:
+        rows = ", ".join(str(row) for row in fallback_matches["excel_row"])
+        towns = sorted({str(town) for town in locations.loc[fallback_matches.index]})
+        warnings.append(
+            "Néhány Hajdú-Biharban szervezett mérkőzés helyszíne nem szerepel a "
+            "távolságmátrixban, ezért Debrecennel számolunk "
+            f"(Excel sorok: {rows}; megadott helyszínek: {', '.join(towns)})."
         )
 
     return matches, warnings
