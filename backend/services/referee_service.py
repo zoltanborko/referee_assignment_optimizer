@@ -1,27 +1,54 @@
 import json
 from datetime import date
-from pathlib import Path
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from werkzeug.security import generate_password_hash
+
+from services.database import connect
+from services.match_pool_service import create_unavailability_notifications
 
 
-REFEREES_FILE = Path(__file__).parent.parent / "data" / "referees.json"
 CADRES = {"megye1", "megye2", "megye3", "megye_egyeb"}
 
 
 def load_referees():
-    if not REFEREES_FILE.exists():
-        return []
-
-    with open(REFEREES_FILE, "r", encoding="utf-8") as file:
-        return json.load(file).get("referees", [])
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT profile_json FROM referees ORDER BY rowid"
+        ).fetchall()
+    return [json.loads(row["profile_json"]) for row in rows]
 
 
 def save_referees(referees):
-    REFEREES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temporary_file = REFEREES_FILE.with_suffix(".json.tmp")
-    with open(temporary_file, "w", encoding="utf-8") as file:
-        json.dump({"referees": referees}, file, ensure_ascii=False, indent=2)
-        file.write("\n")
-    temporary_file.replace(REFEREES_FILE)
+    with connect() as connection:
+        for referee in referees:
+            referee_id = str(referee["id"])
+            connection.execute(
+                """INSERT INTO referees(referee_id, profile_json) VALUES (?, ?)
+                ON CONFLICT(referee_id) DO UPDATE SET profile_json = excluded.profile_json""",
+                (referee_id, json.dumps(referee, ensure_ascii=False)),
+            )
+            connection.execute(
+                """INSERT OR IGNORE INTO users(
+                    username, password_hash, role, must_change_password, active, referee_id
+                ) VALUES (?, ?, 'referee', 1, ?, ?)""",
+                (
+                    referee_id,
+                    generate_password_hash(referee_id),
+                    int(referee.get("active") is True),
+                    referee_id,
+                ),
+            )
+            connection.execute(
+                """UPDATE users SET referee_id = ?, active = ?
+                WHERE username = ? AND role = 'referee' AND referee_id IS NULL""",
+                (referee_id, int(referee.get("active") is True), referee_id),
+            )
+            connection.execute(
+                "UPDATE users SET active = ? WHERE referee_id = ?",
+                (int(referee.get("active") is True), referee_id),
+            )
 
 
 def normalize_referee(data):
@@ -97,30 +124,82 @@ def add_referee(data):
 def update_referee(referee_id, data):
     if not isinstance(data, dict):
         raise ValueError("A játékvezető adatai hibásak.")
-    referees = load_referees()
-    for index, current in enumerate(referees):
-        if str(current.get("id")) == str(referee_id):
-            referee = normalize_referee({
-                **data,
-                "id": current["id"],
-                "unavailable_dates": data.get(
-                    "unavailable_dates",
-                    current.get("unavailable_dates", []),
-                ),
-            })
-            referees[index] = referee
-            save_referees(referees)
-            return referee
-    return None
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT profile_json FROM referees WHERE referee_id = ?",
+            (str(referee_id),),
+        ).fetchone()
+        if row is None:
+            return None
+
+        current = json.loads(row["profile_json"])
+        referee = normalize_referee({
+            **current,
+            **{key: value for key, value in data.items() if key != "unavailable_dates"},
+            "id": current["id"],
+            "unavailable_dates": current.get("unavailable_dates", []),
+        })
+        connection.execute(
+            "UPDATE referees SET profile_json = ? WHERE referee_id = ?",
+            (json.dumps(referee, ensure_ascii=False), str(referee_id)),
+        )
+        connection.execute(
+            "UPDATE users SET active = ? WHERE referee_id = ?",
+            (int(referee.get("active") is True), str(referee_id)),
+        )
+    return referee
+
+
+def update_own_referee(referee_id, data):
+    if not isinstance(data, dict):
+        raise ValueError("A játékvezető adatai hibásak.")
+    editable_fields = {"residence", "has_car", "banned_teams", "unavailable_dates"}
+    if set(data) - editable_fields:
+        raise ValueError("Csak a lakóhely, az autó, a tiltott csapatok és a lemondott dátumok módosíthatók.")
+
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT profile_json FROM referees WHERE referee_id = ?",
+            (str(referee_id),),
+        ).fetchone()
+        if row is None:
+            return None
+
+        current = json.loads(row["profile_json"])
+        updated = normalize_referee({**current, **data})
+        old_dates = set(current.get("unavailable_dates") or [])
+        new_dates = set(updated.get("unavailable_dates") or [])
+        added_dates = new_dates - old_dates
+        earliest_allowed_date = datetime.now(ZoneInfo("Europe/Budapest")).date() + timedelta(days=5)
+        for unavailable_date in added_dates:
+            if date.fromisoformat(unavailable_date) < earliest_allowed_date:
+                raise ValueError("Lemondást legkésőbb a mérkőzés előtt 5 nappal lehet rögzíteni.")
+
+        connection.execute(
+            "UPDATE referees SET profile_json = ? WHERE referee_id = ?",
+            (json.dumps(updated, ensure_ascii=False), str(referee_id)),
+        )
+    if added_dates:
+        create_unavailability_notifications(
+            updated["id"], updated["name"], sorted(added_dates)
+        )
+    return updated
 
 
 def delete_referee(referee_id):
-    referees = load_referees()
-    remaining = [
-        referee for referee in referees
-        if str(referee.get("id")) != str(referee_id)
-    ]
-    if len(remaining) == len(referees):
-        return False
-    save_referees(remaining)
+    referee_id = str(referee_id)
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        exists = connection.execute(
+            "SELECT 1 FROM referees WHERE referee_id = ?", (referee_id,)
+        ).fetchone()
+        if exists is None:
+            return False
+        connection.execute(
+            "UPDATE users SET active = 0, referee_id = NULL WHERE referee_id = ?",
+            (referee_id,),
+        )
+        connection.execute("DELETE FROM referees WHERE referee_id = ?", (referee_id,))
     return True

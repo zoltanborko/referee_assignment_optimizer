@@ -1,4 +1,7 @@
 backend/data/*.json
+backend/data/assignment.sqlite3
+backend/data/assignment.sqlite3-shm
+backend/data/assignment.sqlite3-wal
 
 backend/services/x__pycache__/
 *.pyc
