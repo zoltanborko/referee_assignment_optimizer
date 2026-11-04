@@ -104,6 +104,21 @@ CREATE TABLE IF NOT EXISTS version_matches (
 CREATE INDEX IF NOT EXISTS version_matches_date_idx
     ON version_matches(version_id, match_date, position);
 
+CREATE TABLE IF NOT EXISTS assignment_unused_referees (
+    version_id INTEGER NOT NULL REFERENCES assignment_versions(version_id) ON DELETE CASCADE,
+    match_date TEXT NOT NULL,
+    referee_id TEXT NOT NULL,
+    referee_name TEXT NOT NULL,
+    PRIMARY KEY (version_id, match_date, referee_id)
+);
+
+CREATE TABLE IF NOT EXISTS upload_referee_exclusions (
+    upload_id INTEGER NOT NULL REFERENCES uploads(upload_id) ON DELETE CASCADE,
+    match_date TEXT NOT NULL,
+    referee_id TEXT NOT NULL REFERENCES referees(referee_id) ON DELETE CASCADE,
+    PRIMARY KEY (upload_id, match_date, referee_id)
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
     notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
     upload_id INTEGER NOT NULL REFERENCES uploads(upload_id) ON DELETE CASCADE,

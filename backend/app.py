@@ -17,7 +17,7 @@ from services.auth_service import (
 )
 
 from services.excel_import import import_matches_from_excel
-from services.ref_pool_service import load_ref_pool, set_ref_pool
+from services.ref_pool_service import load_ref_pool, load_ref_pool_for_date, set_ref_pool
 from services.referee_service import (
     add_referee,
     delete_referee,
@@ -35,6 +35,8 @@ from services.match_pool_service import (
     list_notifications,
     load_matches as load_matchpool_matches,
     load_referee_matches,
+    get_upload_referee_exclusions,
+    set_upload_referee_exclusions,
     mark_notification_read,
 )
 
@@ -381,19 +383,74 @@ def upload_matches():
 @app.route("/uploads", methods=["GET"])
 @roles_required("admin", "sender")
 def get_uploads():
-    owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
-    return jsonify({"uploads": list_uploads(owner_id)})
+    uploads = list_uploads()
+    for upload in uploads:
+        upload["is_owner"] = (
+            g.user["role"] == "admin"
+            or upload.get("created_by") == g.user["user_id"]
+        )
+    return jsonify({"uploads": uploads})
 
 
 @app.route("/uploads/<int:upload_id>", methods=["GET"])
 @roles_required("admin", "sender")
 def get_upload_detail(upload_id):
-    owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
-    upload = get_upload(upload_id, owner_id)
+    upload = get_upload(upload_id)
     if upload is None:
         return jsonify({"error": "A feltöltés nem található."}), 404
     upload["matches"] = load_upload_matches(upload_id)
     return jsonify({"upload": upload})
+
+
+@app.route("/uploads/<int:upload_id>/referee-exclusions", methods=["GET"])
+@roles_required("admin", "sender")
+def get_upload_exclusions(upload_id):
+    owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
+    upload = get_upload(upload_id, owner_id)
+    if upload is None:
+        return jsonify({"error": "A feltöltés nem található."}), 404
+    exclusions = get_upload_referee_exclusions(upload_id)
+    return jsonify({
+        "dates": [
+            {
+                "date": match_date,
+                "referees": load_ref_pool_for_date(match_date),
+                "excluded_ids": exclusions.get(match_date, []),
+            }
+            for match_date in upload["dates"]
+        ]
+    })
+
+
+@app.route("/uploads/<int:upload_id>/referee-exclusions", methods=["PUT"])
+@roles_required("admin", "sender")
+def update_upload_exclusions(upload_id):
+    owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
+    upload = get_upload(upload_id, owner_id)
+    if upload is None:
+        return jsonify({"error": "A feltöltés nem található."}), 404
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "A letiltási adatok hibásak."}), 400
+    match_date = payload.get("match_date")
+    referee_ids = payload.get("excluded_referee_ids")
+    if match_date not in upload["dates"]:
+        return jsonify({"error": "Ez a dátum nem szerepel a feltöltésben."}), 400
+    if not isinstance(referee_ids, list) or any(
+        isinstance(referee_id, bool) or not isinstance(referee_id, (str, int))
+        for referee_id in referee_ids
+    ):
+        return jsonify({"error": "A letiltott játékvezető-azonosítók listája hibás."}), 400
+    referee_ids = list(dict.fromkeys(str(referee_id).strip() for referee_id in referee_ids))
+    if any(not referee_id for referee_id in referee_ids):
+        return jsonify({"error": "A játékvezető-azonosító nem lehet üres."}), 400
+    eligible_ids = {
+        str(referee.get("id")) for referee in load_ref_pool_for_date(match_date)
+    }
+    if not set(referee_ids).issubset(eligible_ids):
+        return jsonify({"error": "Csak az adott napon elérhető refpool-játékvezetők tilthatók le."}), 400
+    set_upload_referee_exclusions(upload_id, match_date, referee_ids)
+    return jsonify({"message": "A letiltások elmentve.", "excluded_referee_ids": referee_ids})
 
 
 @app.route("/uploads/<int:upload_id>/assign", methods=["POST"])

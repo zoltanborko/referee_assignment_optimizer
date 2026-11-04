@@ -14,6 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
 from services.match_pool_service import (
     create_assignment_draft,
     get_upload,
+    get_upload_referee_exclusions,
     get_match_dates,
     load_matches,
     migrate_legacy_matchpool,
@@ -318,10 +319,14 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned, referee_inde
     return possible_crews
 
 
-def _assign_matches_for_date(match_date, save=True):
+def _assign_matches_for_date(match_date, save=True, excluded_referee_ids=None):
     """Find an assignment using only one date's matches and available referees."""
     match_list = load_matches(match_date)
-    referees = load_ref_pool_for_date(match_date)
+    excluded_ids = {str(referee_id) for referee_id in (excluded_referee_ids or [])}
+    referees = [
+        referee for referee in load_ref_pool_for_date(match_date)
+        if str(referee.get("id")) not in excluded_ids
+    ]
     referee_index = {str(referee.get("id")): referee for referee in referees}
     units = get_assignment_units(match_list)
 
@@ -434,6 +439,17 @@ def _assign_matches_for_date(match_date, save=True):
         for match in unit
     ]
     missing_match_ids = [match.get("id") for match in missing_matches]
+    used_referee_ids = {
+        str(referee.get("id"))
+        for match in match_list
+        for referee in [match.get("referee"), *(match.get("assistant") or [])]
+        if isinstance(referee, dict) and referee.get("id") is not None
+    }
+    unused_referees = [
+        {"id": str(referee.get("id")), "name": referee.get("name", "")}
+        for referee in referees
+        if str(referee.get("id")) not in used_referee_ids
+    ]
     result = {
         "success": complete,
         "partial": bool(assignments) and not complete,
@@ -442,6 +458,7 @@ def _assign_matches_for_date(match_date, save=True):
         "assignments": assignments,
         "missing_matches": missing_matches,
         "missing_match_ids": missing_match_ids,
+        "unused_referees": unused_referees,
         "matches": match_list,
         "total_travel_distance": round(
             sum(assignment["travel_distance"] for assignment in assignments),
@@ -506,8 +523,13 @@ def assign_upload(upload_id, owner_id=None):
 
     date_results = {}
     date_matches = {}
+    exclusions_by_date = get_upload_referee_exclusions(upload_id)
     for match_date in upload["dates"]:
-        result = _assign_matches_for_date(match_date, save=False)
+        result = _assign_matches_for_date(
+            match_date,
+            save=False,
+            excluded_referee_ids=exclusions_by_date.get(match_date, []),
+        )
         date_results[match_date] = result
         date_matches[match_date] = result["matches"]
 
@@ -542,7 +564,14 @@ def assign_upload(upload_id, owner_id=None):
         for matches_for_date in date_matches.values()
         for match in matches_for_date
     )
-    version_id = create_assignment_draft(upload_id, date_matches, summary)
+    unused_referees_by_date = {
+        match_date: result["unused_referees"]
+        for match_date, result in date_results.items()
+    }
+    summary["unused_referees_by_date"] = unused_referees_by_date
+    version_id = create_assignment_draft(
+        upload_id, date_matches, summary, unused_referees_by_date
+    )
     summary["upload_id"] = upload_id
     summary["version_id"] = version_id
     summary["date_results"] = {

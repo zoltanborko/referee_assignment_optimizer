@@ -87,10 +87,12 @@ def get_match_dates():
 
 
 def get_upload(upload_id, owner_id=None):
-    query = "SELECT * FROM uploads WHERE upload_id = ?"
+    query = """SELECT uploads.*, users.username AS created_by_username
+    FROM uploads LEFT JOIN users ON users.user_id = uploads.created_by
+    WHERE uploads.upload_id = ?"""
     parameters = [upload_id]
     if owner_id is not None:
-        query += " AND created_by = ?"
+        query += " AND uploads.created_by = ?"
         parameters.append(owner_id)
     with connect() as connection:
         row = connection.execute(query, parameters).fetchone()
@@ -109,11 +111,59 @@ def get_upload(upload_id, owner_id=None):
             ORDER BY version_id DESC""",
             (upload_id,),
         ).fetchall()
+        version_ids = [version["version_id"] for version in versions]
+        unused_by_version = {version_id: {} for version_id in version_ids}
+        if version_ids:
+            placeholders = ",".join("?" for _ in version_ids)
+            unused_rows = connection.execute(
+                f"""SELECT version_id, match_date, referee_id, referee_name
+                FROM assignment_unused_referees
+                WHERE version_id IN ({placeholders})
+                ORDER BY match_date, referee_name""",
+                version_ids,
+            ).fetchall()
+            for unused in unused_rows:
+                unused_by_version[unused["version_id"]].setdefault(
+                    unused["match_date"], []
+                ).append({"id": unused["referee_id"], "name": unused["referee_name"]})
     info = dict(row)
     info["dates"] = [date_row["match_date"] for date_row in dates]
-    info["draft"] = next((dict(version) for version in versions if version["status"] == "draft"), None)
-    info["published"] = next((dict(version) for version in versions if version["status"] == "published"), None)
+    version_data = []
+    for version in versions:
+        item = dict(version)
+        item["unused_referees_by_date"] = unused_by_version[version["version_id"]]
+        version_data.append(item)
+    info["draft"] = next((version for version in version_data if version["status"] == "draft"), None)
+    info["published"] = next((version for version in version_data if version["status"] == "published"), None)
     return info
+
+
+def get_upload_referee_exclusions(upload_id):
+    with connect() as connection:
+        rows = connection.execute(
+            """SELECT match_date, referee_id FROM upload_referee_exclusions
+            WHERE upload_id = ? ORDER BY match_date, referee_id""",
+            (upload_id,),
+        ).fetchall()
+    exclusions = {}
+    for row in rows:
+        exclusions.setdefault(row["match_date"], []).append(row["referee_id"])
+    return exclusions
+
+
+def set_upload_referee_exclusions(upload_id, match_date, referee_ids):
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            "DELETE FROM upload_referee_exclusions WHERE upload_id = ? AND match_date = ?",
+            (upload_id, match_date),
+        )
+        connection.executemany(
+            """INSERT INTO upload_referee_exclusions(upload_id, match_date, referee_id)
+            VALUES (?, ?, ?)""",
+            [(upload_id, match_date, str(referee_id)) for referee_id in referee_ids],
+        )
+    return True
 
 
 def list_uploads(owner_id=None):
@@ -152,7 +202,7 @@ def load_upload_matches(upload_id, match_date=None):
     return [json.loads(row["match_json"]) for row in rows]
 
 
-def create_assignment_draft(upload_id, date_matches, result):
+def create_assignment_draft(upload_id, date_matches, result, unused_referees_by_date=None):
     assigned_count = sum(
         isinstance(match.get("referee"), dict)
         for matches in date_matches.values()
@@ -213,6 +263,16 @@ def create_assignment_draft(upload_id, date_matches, result):
                         int(not isinstance(match.get("referee"), dict)),
                     )
                     for position, match in enumerate(matches)
+                ],
+            )
+        for match_date, referees in (unused_referees_by_date or {}).items():
+            connection.executemany(
+                """INSERT INTO assignment_unused_referees(
+                    version_id, match_date, referee_id, referee_name
+                ) VALUES (?, ?, ?, ?)""",
+                [
+                    (version_id, match_date, str(referee["id"]), referee["name"])
+                    for referee in referees
                 ],
             )
     return version_id
@@ -459,6 +519,7 @@ def create_match_pool(matchlist, created_by=None, source_filename=None):
         if paired_match:
             match["paired_match_id"] = paired_match["id"]
 
+    match_positions = {id(match): position for position, match in enumerate(matchlist)}
     matches_by_date = {}
     for match in matchlist:
         match_date = str(match.get("date") or "")
@@ -505,16 +566,16 @@ def create_match_pool(matchlist, created_by=None, source_filename=None):
                         (
                             upload_id,
                             match_date,
-                            position,
+                            match_positions[id(match)],
                             json.dumps(match.get("id"), ensure_ascii=False)
                             if match.get("id") is not None else None,
                             json.dumps(match, ensure_ascii=False),
                         )
-                        for position, match in enumerate(date_matches)
+                        for match in date_matches
                     ],
                 )
     except sqlite3.IntegrityError as error:
         raise ValueError(
-            "Már van feltöltés az Excel egyik dátumára. A teljes fájlt nem mentettük el."
+            "A feltöltés mentése adatütközés miatt nem sikerült. A teljes fájlt nem mentettük el."
         ) from error
     return upload_id

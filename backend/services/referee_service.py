@@ -41,6 +41,11 @@ def save_referees(referees):
                 ),
             )
             connection.execute(
+                """UPDATE users SET referee_id = ?, active = ?
+                WHERE username = ? AND role = 'referee' AND referee_id IS NULL""",
+                (referee_id, int(referee.get("active") is True), referee_id),
+            )
+            connection.execute(
                 "UPDATE users SET active = ? WHERE referee_id = ?",
                 (int(referee.get("active") is True), referee_id),
             )
@@ -119,21 +124,31 @@ def add_referee(data):
 def update_referee(referee_id, data):
     if not isinstance(data, dict):
         raise ValueError("A játékvezető adatai hibásak.")
-    referees = load_referees()
-    for index, current in enumerate(referees):
-        if str(current.get("id")) == str(referee_id):
-            referee = normalize_referee({
-                **data,
-                "id": current["id"],
-                "unavailable_dates": data.get(
-                    "unavailable_dates",
-                    current.get("unavailable_dates", []),
-                ),
-            })
-            referees[index] = referee
-            save_referees(referees)
-            return referee
-    return None
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT profile_json FROM referees WHERE referee_id = ?",
+            (str(referee_id),),
+        ).fetchone()
+        if row is None:
+            return None
+
+        current = json.loads(row["profile_json"])
+        referee = normalize_referee({
+            **current,
+            **{key: value for key, value in data.items() if key != "unavailable_dates"},
+            "id": current["id"],
+            "unavailable_dates": current.get("unavailable_dates", []),
+        })
+        connection.execute(
+            "UPDATE referees SET profile_json = ? WHERE referee_id = ?",
+            (json.dumps(referee, ensure_ascii=False), str(referee_id)),
+        )
+        connection.execute(
+            "UPDATE users SET active = ? WHERE referee_id = ?",
+            (int(referee.get("active") is True), str(referee_id)),
+        )
+    return referee
 
 
 def update_own_referee(referee_id, data):
@@ -174,10 +189,17 @@ def update_own_referee(referee_id, data):
 
 
 def delete_referee(referee_id):
-    referees = load_referees()
-    for referee in referees:
-        if str(referee.get("id")) == str(referee_id):
-            referee["active"] = False
-            save_referees(referees)
-            return True
-    return False
+    referee_id = str(referee_id)
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        exists = connection.execute(
+            "SELECT 1 FROM referees WHERE referee_id = ?", (referee_id,)
+        ).fetchone()
+        if exists is None:
+            return False
+        connection.execute(
+            "UPDATE users SET active = 0, referee_id = NULL WHERE referee_id = ?",
+            (referee_id,),
+        )
+        connection.execute("DELETE FROM referees WHERE referee_id = ?", (referee_id,))
+    return True
