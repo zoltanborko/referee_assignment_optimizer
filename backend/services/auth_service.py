@@ -122,7 +122,7 @@ def reset_user_password(user_id, temporary_password):
     with connect() as connection:
         cursor = connection.execute(
             """UPDATE users SET password_hash = ?, must_change_password = 1
-            WHERE user_id = ? AND active = 1""",
+            WHERE user_id = ? AND (role != 'referee' OR referee_id IS NOT NULL)""",
             (generate_password_hash(temporary_password), user_id),
         )
     return get_user(user_id) if cursor.rowcount else None
