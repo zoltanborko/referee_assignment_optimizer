@@ -230,6 +230,21 @@ def initialize_database():
             if "source_file" not in upload_columns:
                 connection.execute("ALTER TABLE uploads ADD COLUMN source_file BLOB")
                 connection.commit()
+            notification_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(notifications)")
+            }
+            for column in ("referee_id", "match_date"):
+                if column not in notification_columns:
+                    connection.execute(
+                        f"ALTER TABLE notifications ADD COLUMN {column} TEXT"
+                    )
+            connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS notifications_referee_date_idx
+                ON notifications(upload_id, notification_type, referee_id, match_date)
+                WHERE referee_id IS NOT NULL AND match_date IS NOT NULL"""
+            )
+            connection.commit()
             connection.execute("PRAGMA journal_mode = WAL")
             migration_done = connection.execute(
                 "SELECT 1 FROM schema_migrations WHERE migration_key = ?",
