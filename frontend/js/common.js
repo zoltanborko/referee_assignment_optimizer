@@ -6,7 +6,7 @@ const roleLabels = { referee: "Játékvezetői felület", sender: "Küldői fel�
 export function renderPage(user, content) {
   app.innerHTML = `
     <header class="topbar">
-      <div class="brand"><span class="brand-mark">J</span><span>Játékvezetői küldés</span></div>
+      <div class="brand"><img class="brand-logo" src="/assets/assets/whistle.png" alt=""><span>Játékvezetői küldés</span></div>
       <div class="top-actions"><span class="user-chip">${escapeHtml(user.username)} · ${roleLabels[user.role] || "Felhasználó"}</span>
         <button class="button secondary" id="change-password">Jelszócsere</button>
         <button class="button" id="logout">Kilépés</button>

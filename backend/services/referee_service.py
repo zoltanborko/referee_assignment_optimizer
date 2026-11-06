@@ -181,10 +181,11 @@ def update_own_referee(referee_id, data):
             "UPDATE referees SET profile_json = ? WHERE referee_id = ?",
             (json.dumps(updated, ensure_ascii=False), str(referee_id)),
         )
-    if added_dates:
-        create_unavailability_notifications(
-            updated["id"], updated["name"], sorted(added_dates)
-        )
+    # Reconcile all saved dates, so a notification missed by an older database
+    # schema or a previous failed request can be created on the next profile save.
+    create_unavailability_notifications(
+        updated["id"], updated["name"], sorted(new_dates)
+    )
     return updated
 
 
