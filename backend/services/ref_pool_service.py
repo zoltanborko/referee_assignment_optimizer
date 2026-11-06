@@ -3,6 +3,7 @@ from services.referee_service import load_referees
 
 
 def load_ref_pool():
+    """Return selected referees that are currently active."""
     with connect() as connection:
         selected_ids = {
             row["referee_id"]
@@ -24,6 +25,7 @@ def load_ref_pool_for_date(match_date):
 
 
 def set_ref_pool(referee_ids):
+    """Replace the selected pool, ignoring IDs without active profiles."""
     if not isinstance(referee_ids, list) or not all(
         isinstance(referee_id, (str, int)) for referee_id in referee_ids
     ):

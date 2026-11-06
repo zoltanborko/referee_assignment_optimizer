@@ -13,10 +13,6 @@ G = ox.graph.graph_from_place(
     retain_all=True,
 )
 
-import time
-import osmnx as ox
-import networkx as nx
-
 extra_places = [
     "Érmihályfalva, Bihor, Romania",
     "Szorgalmatos, Szabolcs-Szatmár-Bereg, Hungary",

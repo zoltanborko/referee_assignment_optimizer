@@ -62,6 +62,7 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 @app.before_request
 def require_csrf_token():
+    """Require a session-bound token for every state-changing request."""
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return None
     expected = session.get("csrf_token")
@@ -92,6 +93,7 @@ def auth_login():
     user = authenticate(payload.get("username"), payload.get("password"))
     if user is None:
         return jsonify({"error": "Hibás felhasználónév vagy jelszó."}), 401
+    # Replace any pre-login session data before creating the authenticated one.
     session.clear()
     session.permanent = True
     session["user_id"] = user["user_id"]
@@ -345,6 +347,8 @@ def upload_matches():
         }), 400
 
     try:
+        # Keep the original bytes so a completed assignment can be exported
+        # into the exact workbook the sender uploaded.
         source_file = file.read()
         matches, warnings = import_matches_from_excel(BytesIO(source_file))
 
@@ -400,6 +404,7 @@ def get_uploads():
 @app.route("/uploads/<int:upload_id>", methods=["GET"])
 @roles_required("admin", "sender")
 def get_upload_detail(upload_id):
+    """Return an upload's matches; senders may inspect other senders' uploads."""
     upload = get_upload(upload_id)
     if upload is None:
         return jsonify({"error": "A feltöltés nem található."}), 404
@@ -410,6 +415,7 @@ def get_upload_detail(upload_id):
 @app.route("/uploads/<int:upload_id>/export", methods=["GET"])
 @roles_required("admin", "sender")
 def export_upload_assignment(upload_id):
+    """Export the current draft or published assignment into its source workbook."""
     owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
     upload = get_upload(upload_id, owner_id)
     if upload is None:
@@ -490,6 +496,7 @@ def update_upload_exclusions(upload_id):
 @app.route("/uploads/<int:upload_id>/assign", methods=["POST"])
 @roles_required("admin", "sender")
 def run_upload_assignment(upload_id):
+    """Create a new draft; admins may target any upload, senders only their own."""
     from services.assigner_service import assign_upload
 
     owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
@@ -502,6 +509,7 @@ def run_upload_assignment(upload_id):
 @app.route("/uploads/<int:upload_id>/finalize", methods=["POST"])
 @roles_required("admin", "sender")
 def finalize_upload_assignment(upload_id):
+    """Publish the owner's draft so the assigned referees can see it."""
     owner_id = None if g.user["role"] == "admin" else g.user["user_id"]
     upload, error = finalize_upload(upload_id, owner_id)
     if error == "not_found":

@@ -4,7 +4,8 @@ backend/data/assignment.sqlite3
 backend/data/assignment.sqlite3-shm
 backend/data/assignment.sqlite3-wal
 
-backend/services/x__pycache__/
+__pycache__/
 *.pyc
 
 cache/
+.DS_Store

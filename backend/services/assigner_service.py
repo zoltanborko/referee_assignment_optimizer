@@ -2,28 +2,19 @@ import json
 import random
 from functools import lru_cache
 from itertools import combinations, permutations
-import sys
 from pathlib import Path
-
-# Allow running this file directly from the repository root as well as importing
-# it as a module from the backend package.
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
 
 from services.match_pool_service import (
     create_assignment_draft,
     get_upload,
     get_upload_referee_exclusions,
-    get_match_dates,
     load_matches,
-    migrate_legacy_matchpool,
-    save_matchpool,
 )
-from services.ref_pool_service import load_ref_pool, load_ref_pool_for_date
+from services.ref_pool_service import load_ref_pool_for_date
 
 
 DISTANCES_FILE = Path(__file__).parent.parent / "data" / "distances.json"
+# Both candidate validation and route scoring use this precomputed matrix.
 with open(DISTANCES_FILE, "r", encoding="utf-8") as file:
     DISTANCES = json.load(file)
 
@@ -44,31 +35,11 @@ REFEREE_CADRE_RANKS = {
     "megye3": 3,
     "megye_egyeb": 4,
 }
-referees = load_ref_pool()
-referees_by_id = {str(referee.get("id")): referee for referee in referees}
-matches = load_matches()
 
-
-def get_assigned_by_date(match_list):
-    """Collect all assigned crew members in date-keyed ID sets."""
-    assigned_by_date = {}
-    for match in match_list:
-        date = str(match.get("date") or "")
-        assigned_by_date.setdefault(date, set())
-        assigned = [match.get("referee"), *(match.get("assistant") or [])]
-        assigned_by_date[date].update(
-            str(referee.get("id"))
-            for referee in assigned
-            if isinstance(referee, dict) and referee.get("id") is not None
-        )
-    return assigned_by_date
-
-
-already_assigned = get_assigned_by_date(matches)
 
 @lru_cache(maxsize=None)
 def get_distance_between_towns(origin, destination):
-    """Return the road distance in km between two towns."""
+    """Return a stored road distance in km, accepting either town order."""
     distance = DISTANCES.get(origin, {}).get(destination)
     if distance is None:
         distance = DISTANCES.get(destination, {}).get(origin)
@@ -79,7 +50,11 @@ def get_distance_between_towns(origin, destination):
 
 @lru_cache(maxsize=None)
 def _cached_travel_distance(match_location, participants):
-    """Cache route totals by destination and residence/car combinations."""
+    """Find the shortest valid pickup order for a crew and cache its distance.
+
+    The first referee in the route must have a car. Participants are tuples of
+    (residence, has_car), so equivalent crews share this cached calculation.
+    """
     possible_distances = []
     for route_order in permutations(participants):
         if not route_order[0][1]:
@@ -101,8 +76,12 @@ def _cached_travel_distance(match_location, participants):
     return round(min(possible_distances), 2)
 
 
-def calculate_travel_distance(match_location, *referee_ids, referee_index=None):
-    """Return the shortest shared-car route distance for one to three referees."""
+def calculate_travel_distance(match_location, *referee_ids, referee_index):
+    """Return the shortest shared-car route distance for a crew of up to three.
+
+    The supplied index keeps this calculation tied to the active date's
+    eligible referee pool rather than a stale module-level snapshot.
+    """
     if not 1 <= len(referee_ids) <= 3:
         raise ValueError("1–3 játékvezető-azonosítót kell megadni.")
 
@@ -110,7 +89,6 @@ def calculate_travel_distance(match_location, *referee_ids, referee_index=None):
     if len(set(requested_ids)) != len(requested_ids):
         raise ValueError("A játékvezető-azonosítók különbözőek legyenek.")
 
-    referee_index = referees_by_id if referee_index is None else referee_index
     missing_ids = [ref_id for ref_id in requested_ids if ref_id not in referee_index]
     if missing_ids:
         raise ValueError(f"Nem található játékvezető-azonosító: {', '.join(missing_ids)}")
@@ -130,7 +108,11 @@ def calculate_travel_distance(match_location, *referee_ids, referee_index=None):
 
 
 def get_assignment_units(match_list):
-    """Group each paired match with its partner; leave unpaired matches alone."""
+    """Treat paired matches as one indivisible assignment unit.
+
+    A crew is selected once for the pair and cannot be split across other
+    matches. Unpaired matches each form their own unit.
+    """
     matches_by_id = {match.get("id"): match for match in match_list}
     seen_match_ids = set()
     units = []
@@ -156,7 +138,13 @@ def get_unit_dates(unit):
 
 
 def shift_paired_crew(matches_in_unit, crew):
-    """Rotate crew roles between paired matches and return roles per match."""
+    """Assign a selected crew to a match or rotate roles across a pair.
+
+    Paired games are ordered with adult matches first. When the games need
+    different crew sizes, the smaller game starts from the next crew member;
+    equal-sized games rotate their roles so the same referee is not always
+    the lead official.
+    """
     if len(matches_in_unit) < 2:
         match = matches_in_unit[0]
         return {match.get("id"): {"referee": crew["referee"], "assistants": crew["assistants"]}}
@@ -193,7 +181,11 @@ def shift_paired_crew(matches_in_unit, crew):
 
 
 def get_match_referee_indices(matches_in_unit):
-    """Return each match's referee index in an ordered crew, without building roles."""
+    """Map each match to its lead-referee position in the ordered crew.
+
+    This mirrors ``shift_paired_crew`` without building role dictionaries, so
+    cadre eligibility can be checked before a candidate crew is accepted.
+    """
     if len(matches_in_unit) < 2:
         return [(matches_in_unit[0], 0)]
 
@@ -230,7 +222,7 @@ def get_match_referee_indices(matches_in_unit):
 
 
 def find_possible_crews(matches_in_unit, refpool, already_assigned, referee_index=None):
-    """Return all valid referee and assistant groups for one match or paired unit."""
+    """Enumerate crews that meet cadre, availability, car and travel rules."""
     if not matches_in_unit:
         return []
 
@@ -257,6 +249,7 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned, referee_inde
         for match in matches_in_unit
         if str(match.get("location", "")).strip().casefold() != "debrecen"
     }
+    # A referee from a match's own town is excluded, except for Debrecen.
     already_assigned_ids = set()
     if isinstance(already_assigned, dict):
         for date in get_unit_dates(matches_in_unit):
@@ -271,6 +264,7 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned, referee_inde
         not in forbidden_residences
     ]
 
+    # Randomize only tie order; candidates are later grouped by travel distance.
     random.shuffle(available)
     possible_crews = []
     for crew_members in combinations(available, required_count):
@@ -292,6 +286,8 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned, referee_inde
                 (cadre_rank := REFEREE_CADRE_RANKS.get(
                     str(ordered_crew[referee_index].get("cadre", "")).casefold()
                 )) is None
+                # Lower rank numbers mean a higher cadre; the lead referee
+                # must meet or exceed each match's required cadre.
                 or cadre_rank > required_ranks[match.get("id")]
                 for match, referee_index in match_referee_indices
             ):
@@ -319,8 +315,8 @@ def find_possible_crews(matches_in_unit, refpool, already_assigned, referee_inde
     return possible_crews
 
 
-def _assign_matches_for_date(match_date, save=True, excluded_referee_ids=None):
-    """Find an assignment using only one date's matches and available referees."""
+def _assign_matches_for_date(match_date, excluded_referee_ids=None):
+    """Assign one date's matches, returning a complete or best-effort result."""
     match_list = load_matches(match_date)
     excluded_ids = {str(referee_id) for referee_id in (excluded_referee_ids or [])}
     referees = [
@@ -330,8 +326,8 @@ def _assign_matches_for_date(match_date, save=True, excluded_referee_ids=None):
     referee_index = {str(referee.get("id")): referee for referee in referees}
     units = get_assignment_units(match_list)
 
-    # This assignment run starts with an unassigned pool. The search tracks
-    # reservations locally while backtracking.
+    # Each run rebuilds the date's assignments from scratch. The search keeps
+    # reservations locally so a referee cannot be assigned to two same-day units.
     used_ids = set()
     unit_options = []
     candidates_by_unit = {}
@@ -348,12 +344,14 @@ def _assign_matches_for_date(match_date, save=True, excluded_referee_ids=None):
         candidates_by_unit[index] = randomized_candidates
         unit_options.append((len(possible_crews), index))
 
+    # Try the units with the fewest candidates first to prune the search early.
     unit_order = [index for _, index in sorted(unit_options)]
     chosen_crews = {}
 
     unit_dates = [get_unit_dates(unit) for unit in units]
 
     def search(position, reserved_by_date):
+        """Depth-first backtracking: stop at the first complete assignment."""
         if position == len(unit_order):
             return True
 
@@ -383,9 +381,11 @@ def _assign_matches_for_date(match_date, save=True, excluded_referee_ids=None):
         and all(count for count, _ in unit_options)
         and search(0, {})
     )
-    search = None  # Break its self-reference cycle before returning.
+    search = None  # Break the recursive closure cycle before returning.
 
     if not complete:
+        # If no full solution exists, keep the first non-conflicting crew for
+        # each unit in the same constrained-first order to produce a partial one.
         chosen_crews.clear()
         reserved_by_date = {}
         for unit_index in unit_order:
@@ -466,57 +466,11 @@ def _assign_matches_for_date(match_date, save=True, excluded_referee_ids=None):
         ),
     }
 
-    if save:
-        save_matchpool(match_list, missing_match_ids, match_date)
-
     return result
 
 
-def assign_all_matches(save=True, match_date=None):
-    """Assign one date, or independently process every date pool."""
-    if save:
-        migrate_legacy_matchpool()
-    if match_date is not None:
-        return _assign_matches_for_date(match_date, save)
-
-    dates = get_match_dates()
-    date_results = {
-        date: _assign_matches_for_date(date, save)
-        for date in dates
-    }
-    results = list(date_results.values())
-    assignments = [
-        assignment
-        for result in results
-        for assignment in result["assignments"]
-    ]
-    missing_matches = [
-        match
-        for result in results
-        for match in result["missing_matches"]
-    ]
-    missing_match_ids = [
-        match_id
-        for result in results
-        for match_id in result["missing_match_ids"]
-    ]
-    return {
-        "success": all(result["success"] for result in results),
-        "partial": any(result["partial"] for result in results),
-        "capacity_sufficient": all(result["capacity_sufficient"] for result in results),
-        "date_results": date_results,
-        "assignments": assignments,
-        "missing_matches": missing_matches,
-        "missing_match_ids": missing_match_ids,
-        "total_travel_distance": round(
-            sum(result["total_travel_distance"] for result in results),
-            2,
-        ),
-    }
-
-
 def assign_upload(upload_id, owner_id=None):
-    """Create a new draft assignment version for one uploaded workbook."""
+    """Solve each date in an upload and persist the combined result as a draft."""
     upload = get_upload(upload_id, owner_id)
     if upload is None:
         return None
@@ -527,7 +481,6 @@ def assign_upload(upload_id, owner_id=None):
     for match_date in upload["dates"]:
         result = _assign_matches_for_date(
             match_date,
-            save=False,
             excluded_referee_ids=exclusions_by_date.get(match_date, []),
         )
         date_results[match_date] = result
@@ -583,10 +536,12 @@ def assign_upload(upload_id, owner_id=None):
     return summary
 
 
-def can_assign_all_matches(match_list=None, refpool=None):
-    """Check referee and car capacity independently for every match date."""
-    match_list = matches if match_list is None else match_list
-    refpool = referees if refpool is None else refpool
+def can_assign_all_matches(match_list, refpool):
+    """Check basic referee and car counts for each date before searching.
+
+    A paired unit needs the larger of its two match crew sizes, while only one
+    car is required for that shared crew.
+    """
     required_by_date = {}
     cars_by_date = {}
     ref_cars = sum(referee.get("has_car") is True for referee in refpool)
@@ -601,53 +556,3 @@ def can_assign_all_matches(match_list=None, refpool=None):
         required <= len(refpool) and cars_by_date[date] <= ref_cars
         for date, required in required_by_date.items()
     )
-
-
-def clear_all_assignments():
-    """Remove assignments from every date pool."""
-    migrate_legacy_matchpool()
-    cleared_count = 0
-    for match_date in get_match_dates():
-        matches_for_date = load_matches(match_date)
-        for match in matches_for_date:
-            if match.get("referee") or match.get("assistant"):
-                cleared_count += 1
-            match["referee"] = None
-            match["assistant"] = []
-        save_matchpool(matches_for_date, [], match_date)
-    return cleared_count
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--date", help="Csak a megadott YYYY-MM-DD dátum kiosztása")
-    args = parser.parse_args()
-
-    result = assign_all_matches(match_date=args.date)
-    state = "Sikeres" if result["success"] else "Részleges" if result["partial"] else "Sikertelen"
-    if args.date:
-        print(f"{args.date}: {state.lower()} hozzárendelés.")
-    else:
-        print(f"{state} hozzárendelés {len(result['date_results'])} dátumra.")
-    for assignment in result["assignments"]:
-        for match_assignment in assignment["match_assignments"]:
-            assistants = ", ".join(
-                referee.get("name", "Ismeretlen")
-                for referee in match_assignment["assistants"]
-            ) or "nincs"
-            print(
-                f"Meccs {match_assignment['match_id']}: "
-                f"{match_assignment['referee'].get('name', 'Ismeretlen')}; "
-                f"asszisztens(ek): {assistants}; "
-                f"egység utazása: {assignment['travel_distance']} km"
-            )
-    if result["missing_match_ids"]:
-        print("Kiosztatlan meccsek: " + ", ".join(map(str, result["missing_match_ids"])))
-    if not result["capacity_sufficient"]:
-        print("A teljes kiosztás a játékvezetői létszám vagy az autók száma miatt nem lehetséges.")
-    print(f"Összesített utazási távolság: {result['total_travel_distance']} km")
-    print("Az eredmények dátumonkénti matchpool fájlokba mentve.")
-
-

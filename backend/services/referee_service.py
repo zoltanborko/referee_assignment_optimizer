@@ -13,6 +13,7 @@ CADRES = {"megye1", "megye2", "megye3", "megye_egyeb"}
 
 
 def load_referees():
+    """Load stored referee profiles in their original insertion order."""
     with connect() as connection:
         rows = connection.execute(
             "SELECT profile_json FROM referees ORDER BY rowid"
@@ -21,6 +22,11 @@ def load_referees():
 
 
 def save_referees(referees):
+    """Save profiles and keep their linked login accounts in sync.
+
+    Existing referee accounts keep their passwords; missing accounts are
+    created with the referee ID as a temporary password and must change it.
+    """
     with connect() as connection:
         for referee in referees:
             referee_id = str(referee["id"])
@@ -52,6 +58,7 @@ def save_referees(referees):
 
 
 def normalize_referee(data):
+    """Validate referee input and return a normalized profile dictionary."""
     if not isinstance(data, dict):
         raise ValueError("A játékvezető adatai hibásak.")
 
@@ -110,6 +117,7 @@ def normalize_referee(data):
 
 
 def add_referee(data):
+    """Create a referee profile and its initial login account."""
     referees = load_referees()
     referee = normalize_referee(data)
     if any(str(item.get("id")) == referee["id"] for item in referees):
@@ -122,6 +130,7 @@ def add_referee(data):
 
 
 def update_referee(referee_id, data):
+    """Update an admin-managed profile while preserving its identity/dates."""
     if not isinstance(data, dict):
         raise ValueError("A játékvezető adatai hibásak.")
     with connect() as connection:
@@ -152,6 +161,7 @@ def update_referee(referee_id, data):
 
 
 def update_own_referee(referee_id, data):
+    """Apply referee-editable fields and notify senders of new cancellations."""
     if not isinstance(data, dict):
         raise ValueError("A játékvezető adatai hibásak.")
     editable_fields = {"residence", "has_car", "banned_teams", "unavailable_dates"}
@@ -172,6 +182,7 @@ def update_own_referee(referee_id, data):
         old_dates = set(current.get("unavailable_dates") or [])
         new_dates = set(updated.get("unavailable_dates") or [])
         added_dates = new_dates - old_dates
+        # Enforce the five-day notice rule in Budapest local time, not UTC.
         earliest_allowed_date = datetime.now(ZoneInfo("Europe/Budapest")).date() + timedelta(days=5)
         for unavailable_date in added_dates:
             if date.fromisoformat(unavailable_date) < earliest_allowed_date:
@@ -190,6 +201,7 @@ def update_own_referee(referee_id, data):
 
 
 def delete_referee(referee_id):
+    """Delete the profile but retain its login row as an inactive orphan."""
     referee_id = str(referee_id)
     with connect() as connection:
         connection.execute("BEGIN IMMEDIATE")

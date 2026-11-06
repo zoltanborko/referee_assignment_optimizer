@@ -8,6 +8,7 @@ from services.database import connect
 
 
 def _user_dict(row):
+    """Convert a SQLite user row to the public, password-free shape."""
     if row is None:
         return None
     return {
@@ -21,6 +22,7 @@ def _user_dict(row):
 
 
 def get_user(user_id):
+    """Fetch one account for session validation."""
     with connect() as connection:
         row = connection.execute(
             "SELECT * FROM users WHERE user_id = ?", (user_id,)
@@ -29,6 +31,7 @@ def get_user(user_id):
 
 
 def authenticate(username, password):
+    """Verify credentials and refuse disabled accounts."""
     if not isinstance(username, str) or not isinstance(password, str):
         return None
     with connect() as connection:
@@ -43,6 +46,7 @@ def authenticate(username, password):
 
 
 def change_password(user_id, current_password, new_password):
+    """Verify the current password, enforce minimum length, and replace it."""
     if not isinstance(current_password, str) or not isinstance(new_password, str):
         raise ValueError("A jelenlegi és az új jelszó megadása kötelező.")
     if len(new_password) < 8:
@@ -63,6 +67,7 @@ def change_password(user_id, current_password, new_password):
 
 
 def list_users():
+    """Return account metadata without exposing password hashes."""
     with connect() as connection:
         rows = connection.execute(
             """SELECT user_id, username, role, must_change_password, active, referee_id
@@ -72,6 +77,7 @@ def list_users():
 
 
 def create_user(username, role):
+    """Create an admin or sender account with a username-based temporary password."""
     if not isinstance(username, str) or not username.strip():
         raise ValueError("A felhasználónév megadása kötelező.")
     username = username.strip()
@@ -94,6 +100,7 @@ def create_user(username, role):
 
 
 def set_user_active(user_id, active):
+    """Enable or disable a non-referee account without disabling the last admin."""
     if not isinstance(active, bool):
         raise ValueError("Az aktív állapot értéke true vagy false lehet.")
     with connect() as connection:
@@ -117,6 +124,7 @@ def set_user_active(user_id, active):
 
 
 def reset_user_password(user_id, temporary_password):
+    """Set a temporary password and require it to be changed at next login."""
     if not isinstance(temporary_password, str) or len(temporary_password) < 8:
         raise ValueError("Az ideiglenes jelszónak legalább 8 karakteresnek kell lennie.")
     with connect() as connection:

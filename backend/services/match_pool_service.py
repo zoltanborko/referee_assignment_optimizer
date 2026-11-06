@@ -1,3 +1,5 @@
+"""Persistence and workflow operations for uploaded match pools."""
+
 import json
 import math
 import sqlite3
@@ -6,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from services.database import connect
 
 
-age_group_mapping = {
+AGE_GROUP_MAPPING = {
     "U-12": 1,
     "U-13": 1,
     "U-14": 1,
@@ -20,76 +22,12 @@ age_group_mapping = {
 }
 
 
-def save_matchpool(matchlist, unassigned_match_ids=None, match_date=None):
-    """Update one date's matches in the upload that owns that date."""
-    if match_date is None:
-        dates = sorted({str(match.get("date") or "") for match in matchlist} - {""})
-        if len(dates) > 1:
-            unassigned = set(unassigned_match_ids or [])
-            for date in dates:
-                save_matchpool(
-                    [match for match in matchlist if str(match.get("date") or "") == date],
-                    [match.get("id") for match in matchlist
-                     if str(match.get("date") or "") == date and match.get("id") in unassigned]
-                    if unassigned_match_ids is not None else None,
-                    date,
-                )
-            return
-        if dates:
-            match_date = dates[0]
-    if not match_date:
-        raise ValueError("A mérkőzések dátuma kötelező.")
-
-    with connect() as connection:
-        upload = connection.execute(
-            "SELECT upload_id FROM upload_dates WHERE match_date = ?", (match_date,)
-        ).fetchone()
-        if upload is None:
-            raise ValueError(f"Nincs feltöltés ehhez a dátumhoz: {match_date}.")
-        upload_id = upload["upload_id"]
-        if unassigned_match_ids is None:
-            prior = connection.execute(
-                "SELECT match_json, unassigned FROM matches WHERE upload_id = ? AND match_date = ?",
-                (upload_id, match_date),
-            ).fetchall()
-            unassigned_keys = {
-                json.loads(row["match_json"]).get("id")
-                for row in prior if row["unassigned"]
-            }
-        else:
-            unassigned_keys = set(unassigned_match_ids)
-        connection.execute(
-            "DELETE FROM matches WHERE upload_id = ? AND match_date = ?",
-            (upload_id, match_date),
-        )
-        connection.executemany(
-            """INSERT INTO matches(
-                upload_id, match_date, position, external_id_json, match_json, unassigned
-            ) VALUES (?, ?, ?, ?, ?, ?)""",
-            [
-                (
-                    upload_id,
-                    match_date,
-                    position,
-                    json.dumps(match.get("id"), ensure_ascii=False)
-                    if match.get("id") is not None else None,
-                    json.dumps(match, ensure_ascii=False),
-                    int(match.get("id") in unassigned_keys),
-                )
-                for position, match in enumerate(matchlist)
-            ],
-        )
-
-
-def get_match_dates():
-    with connect() as connection:
-        rows = connection.execute(
-            "SELECT match_date FROM upload_dates ORDER BY match_date"
-        ).fetchall()
-    return [row["match_date"] for row in rows]
-
-
 def get_upload(upload_id, owner_id=None):
+    """Return upload metadata and its current draft/published summaries.
+
+    Passing ``owner_id`` limits the lookup to uploads created by that user;
+    leaving it unset allows callers such as admins to view any upload.
+    """
     query = """SELECT uploads.upload_id, uploads.created_by, uploads.source_filename,
     uploads.status, uploads.created_at,
     (uploads.source_file IS NOT NULL) AS has_source_file,
@@ -146,6 +84,7 @@ def get_upload(upload_id, owner_id=None):
 
 
 def get_upload_source_file(upload_id):
+    """Return the originally uploaded workbook bytes, or ``None`` if absent."""
     with connect() as connection:
         row = connection.execute(
             "SELECT source_file FROM uploads WHERE upload_id = ?", (upload_id,)
@@ -154,6 +93,7 @@ def get_upload_source_file(upload_id):
 
 
 def get_upload_referee_exclusions(upload_id):
+    """Return excluded referee IDs grouped by match date."""
     with connect() as connection:
         rows = connection.execute(
             """SELECT match_date, referee_id FROM upload_referee_exclusions
@@ -167,6 +107,7 @@ def get_upload_referee_exclusions(upload_id):
 
 
 def set_upload_referee_exclusions(upload_id, match_date, referee_ids):
+    """Replace all exclusions for one upload date in a single transaction."""
     with connect() as connection:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute(
@@ -182,6 +123,7 @@ def set_upload_referee_exclusions(upload_id, match_date, referee_ids):
 
 
 def list_uploads(owner_id=None):
+    """List uploads newest first, optionally filtering to one owner."""
     with connect() as connection:
         if owner_id is None:
             rows = connection.execute(
@@ -196,6 +138,11 @@ def list_uploads(owner_id=None):
 
 
 def load_upload_matches(upload_id, match_date=None):
+    """Load matches from the current draft, published version, or base upload.
+
+    A draft takes precedence so senders can inspect proposed changes before
+    publication; uploads without an assignment version show their imported data.
+    """
     with connect() as connection:
         version = connection.execute(
             """SELECT version_id FROM assignment_versions
@@ -224,6 +171,11 @@ def load_upload_matches(upload_id, match_date=None):
 
 
 def create_assignment_draft(upload_id, date_matches, result, unused_referees_by_date=None):
+    """Save a complete date-by-date solver result as a new draft snapshot.
+
+    Older drafts are marked superseded. Published data remains unchanged until
+    ``finalize_upload`` promotes the new draft.
+    """
     assigned_count = sum(
         isinstance(match.get("referee"), dict)
         for matches in date_matches.values()
@@ -300,6 +252,7 @@ def create_assignment_draft(upload_id, date_matches, result, unused_referees_by_
 
 
 def finalize_upload(upload_id, owner_id=None):
+    """Publish a draft with at least one assignment and supersede the old one."""
     with connect() as connection:
         upload_query = "SELECT upload_id FROM uploads WHERE upload_id = ?"
         parameters = [upload_id]
@@ -338,6 +291,7 @@ def finalize_upload(upload_id, owner_id=None):
 
 
 def delete_upload(upload_id, owner_id=None):
+    """Delete an upload if it exists and, when supplied, belongs to the owner."""
     with connect() as connection:
         query = "DELETE FROM uploads WHERE upload_id = ?"
         parameters = [upload_id]
@@ -349,6 +303,12 @@ def delete_upload(upload_id, owner_id=None):
 
 
 def load_matches(match_date=None, owner_id=None):
+    """Load current matches across uploads, preferring each upload's draft.
+
+    With no draft, published assignments are returned; otherwise the original
+    imported match rows are used. ``match_date`` and ``owner_id`` are optional
+    filters used by the assignment workflow and sender dashboard.
+    """
     loaded_matches = []
     with connect() as connection:
         query = "SELECT upload_id FROM uploads"
@@ -383,6 +343,7 @@ def load_matches(match_date=None, owner_id=None):
 
 
 def load_referee_matches(referee_id):
+    """Return only published matches whose crew contains this referee."""
     assigned_matches = []
     with connect() as connection:
         rows = connection.execute(
@@ -404,6 +365,7 @@ def load_referee_matches(referee_id):
 
 
 def list_notifications(owner_id=None):
+    """List reassignment notifications, optionally limited to one sender."""
     with connect() as connection:
         if owner_id is None:
             rows = connection.execute(
@@ -423,6 +385,7 @@ def list_notifications(owner_id=None):
 
 
 def mark_notification_read(notification_id, owner_id=None):
+    """Mark a notification read, respecting an optional upload owner filter."""
     with connect() as connection:
         if owner_id is None:
             cursor = connection.execute(
@@ -439,6 +402,11 @@ def mark_notification_read(notification_id, owner_id=None):
 
 
 def create_unavailability_notifications(referee_id, referee_name, unavailable_dates):
+    """Notify upload owners when a referee declines an already-published date.
+
+    ``INSERT OR IGNORE`` plus the database uniqueness rule makes retries safe:
+    saving the same unavailability again will not create duplicate notices.
+    """
     if not unavailable_dates:
         return 0
     created_at = datetime.now(timezone.utc).isoformat()
@@ -478,11 +446,6 @@ def create_unavailability_notifications(referee_id, referee_name, unavailable_da
     return inserted
 
 
-def migrate_legacy_matchpool():
-    """Kept for compatibility; JSON pools import during database initialization."""
-    return None
-
-
 def add_ref_field(matchlist):
     for match in matchlist:
         match["referee"] = None
@@ -498,16 +461,6 @@ def add_paired_match_field(matchlist):
         match["paired_match_id"] = None
 
 
-def add_done_field(matchlist):
-    for match in matchlist:
-        match["done"] = False
-
-
-def add_has_car_field(matchlist):
-    for match in matchlist:
-        match["has_car"] = False
-
-
 def starting_diff(match1, match2):
     time1 = datetime.strptime(match1["time"], "%H:%M")
     time2 = datetime.strptime(match2["time"], "%H:%M")
@@ -515,13 +468,14 @@ def starting_diff(match1, match2):
 
 
 def find_paired_match(match, matchlist):
+    """Find a same-day, same-venue game suitable for sharing a referee crew."""
     for other_match in matchlist:
         if (
             other_match["id"] != match["id"]
             and other_match["time"] != match["time"]
             and other_match["date"] == match["date"]
             and starting_diff(match, other_match) <= timedelta(hours=3)
-            and age_group_mapping[match["age_group"]] == age_group_mapping[other_match["age_group"]]
+            and AGE_GROUP_MAPPING[match["age_group"]] == AGE_GROUP_MAPPING[other_match["age_group"]]
             and match["location"] == other_match["location"]
             and match["home_team"] == other_match["home_team"]
         ):
@@ -530,11 +484,14 @@ def find_paired_match(match, matchlist):
 
 
 def create_match_pool(matchlist, created_by=None, source_filename=None, source_file=None):
+    """Validate and persist one uploaded workbook as date-separated match pools.
+
+    A date is unique across uploads, so a workbook that overlaps any existing
+    date is rejected as a whole rather than partially saved.
+    """
     add_ref_field(matchlist)
     add_assist_field(matchlist)
     add_paired_match_field(matchlist)
-    add_done_field(matchlist)
-    add_has_car_field(matchlist)
 
     for match in matchlist:
         paired_match = find_paired_match(match, matchlist)

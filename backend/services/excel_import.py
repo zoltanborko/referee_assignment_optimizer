@@ -18,11 +18,16 @@ with DISTANCES_FILE.open("r", encoding="utf-8") as file:
 # ---------------------------------------------------------
 
 def normalize_text(value):
+    """Normalize source text for case-insensitive rule matching."""
     return str(value).strip().lower()
 
 
 def get_required_referees(comp_name):
+    """Map supported competition names to their required crew size.
 
+    Known youth competitions use one or two officials; all other competitions
+    default to a three-person crew.
+    """
     comp_name = normalize_text(comp_name)
 
     two_referees = {
@@ -55,7 +60,7 @@ def get_required_referees(comp_name):
 
 
 def get_required_cadre(competition_type):
-
+    """Convert the source competition tier to the optimizer's cadre label."""
     competition_type = normalize_text(competition_type)
 
     if competition_type == "területi i.":
@@ -71,7 +76,7 @@ def get_required_cadre(competition_type):
 
 
 def extract_settlement(address):
-
+    """Extract a town from the workbook address, defaulting missing text to Debrecen."""
     if pd.isna(address):
         return "Debrecen"
 
@@ -104,7 +109,11 @@ def extract_settlement(address):
 # ---------------------------------------------------------
 
 def import_matches_from_excel(file):
+    """Parse the supported workbook, validate rows, and return matches/warnings.
 
+    The workbook header is on Excel row 8 (pandas header index 7); source row
+    numbers are retained so export can write officials back to the right rows.
+    """
     # Excel beolvasása
     df = pd.read_excel(
         file,
@@ -179,6 +188,8 @@ def import_matches_from_excel(file):
     )
     location_is_in_matrix = canonical_locations.notna()
     accepted_matches = county_is_hajdu_bihar | location_is_in_matrix
+    # County matches stay eligible even when their town is missing from the matrix;
+    # those rows are assigned Debrecen so the optimizer always has a known key.
     fallback_to_debrecen = county_is_hajdu_bihar & ~location_is_in_matrix
     fallback_matches = df.loc[fallback_to_debrecen, ["Cím"]].copy()
     fallback_matches["excel_row"] = [
@@ -257,6 +268,7 @@ def import_matches_from_excel(file):
     # ID
     # -----------------------------------------------------
 
+    # The row index remains the original worksheet row after filters above.
     matches_df.insert(
         0,
         "id",

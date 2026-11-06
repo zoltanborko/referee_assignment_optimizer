@@ -17,6 +17,11 @@ EXPECTED_HEADERS = {
 
 
 def fill_assignment_workbook(source_file, matches):
+    """Fill officials into the uploaded workbook and return it as a byte stream.
+
+    The importer stores each match's original Excel row. Before writing, verify
+    the template headers to avoid placing referee data in the wrong columns.
+    """
     workbook = load_workbook(BytesIO(source_file))
     worksheet = workbook.worksheets[0]
     if any(

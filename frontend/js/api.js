@@ -1,9 +1,6 @@
 let csrfToken = null;
 
-export function updateCsrfToken(token) {
-  csrfToken = token;
-}
-
+// Centralize cookie credentials, CSRF headers, timeouts, and API errors.
 export async function api(path, options = {}) {
   const { timeoutMs, ...requestOptions } = options;
   const headers = new Headers(options.headers || {});
@@ -69,12 +66,8 @@ export const dateLabel = value => {
   return year && month && day ? `${year}.${month}.${day}.` : value;
 };
 
-export function notice(message, kind = "success") {
-  if (!message) return "";
-  return `<div class="notice ${kind === "error" ? "error" : kind === "warning" ? "warning" : ""}" role="status">${escapeHtml(message)}</div>`;
-}
-
-export const emptyState = message => `<div class="empty">${escapeHtml(message)}</div>`;
+export const emptyState = message =>
+  `<div class="empty">${escapeHtml(message)}</div>`;
 
 export function matchTable(matches, showOfficials = true) {
   if (!matches?.length) return emptyState("Ehhez a feltöltéshez még nincs mérkőzés.");
@@ -83,13 +76,38 @@ export function matchTable(matches, showOfficials = true) {
       .filter(Boolean)
       .map(person => person.name || person.id)
       .join(", ");
-    return `<tr>
-      <td>${escapeHtml(dateLabel(match.date))}</td><td>${escapeHtml(match.time || "—")}</td>
-      <td>${escapeHtml(match.compname || "—")}</td>
-      <td>${escapeHtml(match.home_team || "—")} – ${escapeHtml(match.away_team || "—")}</td>
-      <td>${escapeHtml(match.location || "—")}</td><td>${escapeHtml(match.required_referees ?? "—")}</td>
-      ${showOfficials ? `<td>${crew ? escapeHtml(crew) : '<span class="muted">Nincs kiosztva</span>'}</td>` : ""}
-    </tr>`;
+    return `
+      <tr>
+        <td>${escapeHtml(dateLabel(match.date))}</td>
+        <td>${escapeHtml(match.time || "—")}</td>
+        <td>${escapeHtml(match.compname || "—")}</td>
+        <td>
+          ${escapeHtml(match.home_team || "—")} – ${escapeHtml(match.away_team || "—")}
+        </td>
+        <td>${escapeHtml(match.location || "—")}</td>
+        <td>${escapeHtml(match.required_referees ?? "—")}</td>
+        ${showOfficials ? `
+          <td>
+            ${crew ? escapeHtml(crew) : '<span class="muted">Nincs kiosztva</span>'}
+          </td>
+        ` : ""}
+      </tr>`;
   }).join("");
-  return `<div class="table-wrap"><table><thead><tr><th>Dátum</th><th>Kezdés</th><th>Verseny típusa</th><th>Mérkőzés</th><th>Helyszín</th><th>Stáb</th>${showOfficials ? "<th>Játékvezetők</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Dátum</th>
+            <th>Kezdés</th>
+            <th>Verseny típusa</th>
+            <th>Mérkőzés</th>
+            <th>Helyszín</th>
+            <th>Stáb</th>
+            ${showOfficials ? "<th>Játékvezetők</th>" : ""}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
